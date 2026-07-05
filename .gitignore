@@ -1,0 +1,16 @@
+.venv/
+.pytest_cache/
+.ruff_cache/
+.pyrefly/
+__pycache__/
+*.py[cod]
+dist/
+build/
+*.egg-info/
+.codegraph/
+.env
+*.db
+*.sqlite
+*.sqlite3
+.repo-release-gate.local.toml
+.docket-release-gate.local.toml

@@ -63,17 +63,15 @@ _GLOBAL_REGISTRY_ROOT: Path | None = None
 
 WorkspaceOpt = Annotated[
     Path | None,
-    typer.Option(
-        "--workspace-root",
-        help="workspace root; defaults to REGISTRAR_WORKSPACE_ROOT or the home workspace directory",
-    ),
+    typer.Option("--workspace-root", help="workspace root; defaults to ~/workspace"),
 ]
 RegistryOpt = Annotated[
     Path | None,
     typer.Option(
         "--registry-root",
         help=(
-            "registry data root; defaults to REGISTRAR_REGISTRY_ROOT or the home registry directory"
+            "registry data root; defaults to REGISTRAR_REGISTRY_ROOT or "
+            "~/workspace/data/personal/registrar"
         ),
     ),
 ]
@@ -81,7 +79,7 @@ ExternalOpt = Annotated[
     Path | None,
     typer.Option(
         "--external-root",
-        help="external readonly root; defaults to REGISTRAR_EXTERNAL_ROOT or the home external directory",
+        help="external readonly root; defaults to ~/external-readonly",
     ),
 ]
 FormatOpt = Annotated[
@@ -222,7 +220,7 @@ def _worktree_create(
     repo_path: Annotated[Path, typer.Argument(help="source repo path")],
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="issue id like TASK-542 or none:<reason>"),
+        typer.Option("--owner-ref", help="PM issue like PROJ-542 or none:<reason>"),
     ],
     slug: Annotated[
         str,
@@ -278,7 +276,7 @@ def _worktree_register(
     worktree_path: Annotated[Path, typer.Argument(help="existing worktree path")],
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="issue id like TASK-542 or none:<reason>"),
+        typer.Option("--owner-ref", help="PM issue like PROJ-542 or none:<reason>"),
     ],
     world: Annotated[
         str,
@@ -322,7 +320,7 @@ def _worktree_audit(
     ] = None,
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="filter by issue owner_ref"),
+        typer.Option("--owner-ref", help="filter by PM issue owner_ref"),
     ] = "",
     include_retired: Annotated[
         bool,
@@ -332,7 +330,7 @@ def _worktree_audit(
     registry_root: RegistryOpt = None,
     output_format: FormatOpt = "table",
 ) -> None:
-    """audit registered worktrees against issue owner and local git state."""
+    """audit registered worktrees against docket owner and local git state."""
     workspace = expand(workspace_root or default_workspace_root())
     root = _required_registry_root(registry_root)
     records = load_registry(root)
@@ -365,9 +363,7 @@ def _worktree_closeout(
         str,
         typer.Argument(help="registered worktree identity, unique short name, or path"),
     ],
-    dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="plan only; no changes")
-    ] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="plan only; no changes")] = False,
     apply: Annotated[
         bool,
         typer.Option("--apply", help="remove worktree and close the active record"),
@@ -376,7 +372,7 @@ def _worktree_closeout(
         bool,
         typer.Option(
             "--owner-active-ok",
-            help="allow closeout even when issue owner is not closed",
+            help="allow closeout even when docket owner is not closed",
         ),
     ] = False,
     allow_unmerged: Annotated[
@@ -440,10 +436,10 @@ def _worktree_closeout(
 
 
 # `remove` is a discoverability alias of `closeout`; it is the same lifecycle-gated
-# teardown (issue owner check, branch-merge check, finalizers), not a raw delete.
+# teardown (docket owner check, branch-merge check, finalizers), not a raw delete.
 worktree_app.command(
     "remove",
-    help="alias of closeout: lifecycle-gated worktree teardown (issue-gated by default).",
+    help="alias of closeout: lifecycle-gated worktree teardown (docket-gated by default).",
 )(_worktree_closeout)
 
 
@@ -453,9 +449,7 @@ def _relocate(
         str,
         typer.Argument(help="registry identity, unique short name, or absolute path"),
     ],
-    dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="plan only; no changes")
-    ] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="plan only; no changes")] = False,
     apply: Annotated[
         bool,
         typer.Option("--apply", help="execute the move and rewrite live refs"),
@@ -536,29 +530,15 @@ def _render_relocate_result(result: RelocateResult, output_format: str) -> None:
     print(
         table(
             [
-                {
-                    "field": "moved",
-                    "value": f"{result.source_path} -> {result.target_path}",
-                },
+                {"field": "moved", "value": f"{result.source_path} -> {result.target_path}"},
                 {"field": "rewritten", "value": _refs_cell(result.rewritten_refs)},
-                {
-                    "field": "preserved (review)",
-                    "value": _refs_cell(result.preserved_refs),
-                },
+                {"field": "preserved (review)", "value": _refs_cell(result.preserved_refs)},
                 {
                     "field": "registry_file",
-                    "value": str(result.registry_file)
-                    if result.registry_file
-                    else "none",
+                    "value": str(result.registry_file) if result.registry_file else "none",
                 },
-                {
-                    "field": "repos_to_commit",
-                    "value": "; ".join(result.repos_to_commit) or "none",
-                },
-                {
-                    "field": "launchd_reload",
-                    "value": "; ".join(result.launchd_reload) or "none",
-                },
+                {"field": "repos_to_commit", "value": "; ".join(result.repos_to_commit) or "none"},
+                {"field": "launchd_reload", "value": "; ".join(result.launchd_reload) or "none"},
                 {"field": "verified", "value": str(result.verified).lower()},
                 {"field": "remaining_refs", "value": _refs_cell(result.remaining_refs)},
                 {"field": "rollback", "value": " ; ".join(result.rollback)},

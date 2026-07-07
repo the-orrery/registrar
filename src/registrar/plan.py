@@ -103,9 +103,7 @@ def closeout_plan(
                 "close out the implementation repo/service instead"
             )
         if record.path is None:
-            raise RegistrarError(
-                f"{record.name}: metadata.path is required for closeout"
-            )
+            raise RegistrarError(f"{record.name}: metadata.path is required for closeout")
         path = record.path
         name = record.name
         git = git_status(path)

@@ -165,15 +165,15 @@ def _rewrite_pairs(
     pairs = [(s, t)]
     home = str(_home())
     if s.startswith(home + os.sep) and t.startswith(home + os.sep):
-        s_rel, t_rel = s[len(home) :], t[len(home) :]
+        s_rel, t_rel = s[len(home):], t[len(home):]
         for prefix in ("${HOME}", "$HOME", "~"):
             pairs.append((prefix + s_rel, prefix + t_rel))
     ws = str(workspace_root)
     if s.startswith(ws + os.sep) and t.startswith(ws + os.sep):
-        s_rel = s[len(ws) + 1 :]
+        s_rel = s[len(ws) + 1:]
         # Mirror path_variants: never rewrite a bare leaf token.
         if os.sep in s_rel:
-            pairs.append((s_rel, t[len(ws) + 1 :]))
+            pairs.append((s_rel, t[len(ws) + 1:]))
     return pairs
 
 

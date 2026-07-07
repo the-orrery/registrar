@@ -105,7 +105,7 @@ def _check_record_vs_observation(
                 name=record.name,
                 path=record.path,
                 reason="registry record has empty spec.owner_ref",
-                next_action="set owner_ref to a issue id or none:<reason>",
+                next_action="set owner_ref to a PM issue or none:<reason>",
             )
         )
     if record.spec.placement and record.spec.placement != observed_placement:

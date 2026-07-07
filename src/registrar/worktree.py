@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -16,8 +17,17 @@ from .model import API_VERSION, TOMBSTONE_KIND, RegistryAsset
 from .paths import current_placement
 from .registry import derive_identity
 
-WORK_PREFIXES = {"TEAM", "ORG"}
-PERSONAL_PREFIXES = {"LAB", "NOTE", "APP"}
+def _load_prefix_sets() -> tuple[set[str], set[str]]:
+    """Load owner-ref prefix→world mapping from env or defaults."""
+    work = os.environ.get("REGISTRAR_WORK_PREFIXES", "")
+    personal = os.environ.get("REGISTRAR_PERSONAL_PREFIXES", "")
+    return (
+        {p.strip() for p in work.split(",") if p.strip()} or {"TEAM", "ORG"},
+        {p.strip() for p in personal.split(",") if p.strip()} or {"LAB", "NOTE", "APP"},
+    )
+
+
+WORK_PREFIXES, PERSONAL_PREFIXES = _load_prefix_sets()
 
 
 @dataclass(frozen=True)
@@ -180,9 +190,7 @@ def plan_register_worktree(
 
     owner = _normalize_owner_ref(owner_ref)
     name = source_repo.strip() or _infer_source_repo(path, owner)
-    inferred_world = _infer_world(
-        owner, _source_repo_path(path), records, workspace_root, world
-    )
+    inferred_world = _infer_world(owner, _source_repo_path(path), records, workspace_root, world)
     branch_name = _git_stdout(path, "rev-parse", "--abbrev-ref", "HEAD")
     if branch_name == "HEAD":
         branch_name = ""
@@ -215,17 +223,7 @@ def apply_create_worktree(plan: WorktreePlan) -> WorktreePlan:
     try:
         _write_registry_file(plan.registry_file, plan.document)
     except Exception:
-        _run(
-            (
-                "git",
-                "-C",
-                str(plan.source_repo_path),
-                "worktree",
-                "remove",
-                "--force",
-                str(plan.worktree_path),
-            )
-        )
+        _run(("git", "-C", str(plan.source_repo_path), "worktree", "remove", "--force", str(plan.worktree_path)))
         raise
     commit_registry_change(plan.registry_file, _register_commit_message(plan))
     return _mark_applied(plan)
@@ -282,9 +280,7 @@ def _worktree_document(
         "apiVersion": API_VERSION,
         "kind": "Worktree",
         "metadata": {
-            "identity": derive_identity(
-                "Worktree", path.name, "workspace/worktrees", ""
-            ),
+            "identity": derive_identity("Worktree", path.name, "workspace/worktrees", ""),
             "name": path.name,
             "path": str(path),
             "labels": labels,
@@ -318,7 +314,7 @@ def _normalize_owner_ref(owner_ref: str) -> str:
         return value
     if not re.fullmatch(r"[A-Z][A-Z0-9]+-\d+", value):
         raise RegistrarError(
-            "--owner-ref must be an issue id like TASK-542 or none:<reason>"
+            "--owner-ref must be a PM issue like PROJ-542 or none:<reason>"
         )
     return value
 
@@ -411,22 +407,16 @@ def _registry_file(registry_root: Path, name: str) -> Path:
     return registry_root / "assets" / f"worktree-{name}.yaml"
 
 
-def _ensure_worktree_target(
-    path: Path, workspace_root: Path, *, must_exist: bool
-) -> None:
+def _ensure_worktree_target(path: Path, workspace_root: Path, *, must_exist: bool) -> None:
     try:
         rel = path.resolve().relative_to(workspace_root.resolve())
     except ValueError as exc:
         raise RegistrarError(f"worktree path is outside workspace: {path}") from exc
     if len(rel.parts) < 2 or rel.parts[0] != "worktrees":
-        raise RegistrarError(
-            f"worktree path must be under {workspace_root / 'worktrees'}"
-        )
+        raise RegistrarError(f"worktree path must be under {workspace_root / 'worktrees'}")
     if must_exist:
         if current_placement(path, workspace_root) != "workspace/worktrees":
-            raise RegistrarError(
-                f"path is not classified as workspace/worktrees: {path}"
-            )
+            raise RegistrarError(f"path is not classified as workspace/worktrees: {path}")
     elif path.exists():
         raise RegistrarError(f"worktree path already exists: {path}")
 

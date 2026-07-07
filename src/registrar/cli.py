@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -715,13 +716,64 @@ def _closeout(
     )
 
 
+def _load_tiers() -> dict[str, dict[str, str]]:
+    p = Path.home() / ".config/registrar/tiers.toml"
+    if not p.exists():
+        return {}
+    import tomllib
+
+    with open(p, "rb") as f:
+        data = tomllib.load(f)
+    result: dict[str, dict[str, str]] = {}
+    tiers = data.get("tiers", {})
+    if not isinstance(tiers, dict):
+        print("error: tiers.toml must define a [tiers] table", file=sys.stderr)
+        sys.exit(2)
+    for name, cfg in tiers.items():
+        if not isinstance(cfg, dict) or "workspace_root" not in cfg or "registry_root" not in cfg:
+            print(
+                f"error: tier '{name}' must define workspace_root and registry_root",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        result[name] = {
+            "workspace_root": str(Path(cfg["workspace_root"]).expanduser()),
+            "registry_root": str(Path(cfg["registry_root"]).expanduser()),
+        }
+    return result
+
+
+def _consume_tier(argv: list[str]) -> list[str]:
+    """Extract --tier <name> from argv, set env vars, return remaining argv."""
+    if "--tier" not in argv:
+        return argv
+    idx = argv.index("--tier")
+    if idx + 1 >= len(argv):
+        print("error: --tier requires a value", file=sys.stderr)
+        sys.exit(2)
+    tier_name = argv[idx + 1]
+    tiers = _load_tiers()
+    if tier_name not in tiers:
+        avail = (
+            ", ".join(tiers)
+            if tiers
+            else "(none configured in ~/.config/registrar/tiers.toml)"
+        )
+        print(f"error: unknown tier '{tier_name}'. Available: {avail}", file=sys.stderr)
+        sys.exit(2)
+    cfg = tiers[tier_name]
+    os.environ["REGISTRAR_WORKSPACE_ROOT"] = cfg["workspace_root"]
+    os.environ["REGISTRAR_REGISTRY_ROOT"] = cfg["registry_root"]
+    return argv[:idx] + argv[idx + 2:]
+
+
 def run() -> None:
+    argv = _consume_tier(sys.argv[1:])
+    sys.argv = [sys.argv[0], *argv]
     try:
         app()
     except RegistrarError as exc:
         print(f"error: {exc.message}", file=sys.stderr)
-        # SystemExit (not typer.Exit) so the top-level entry point exits 1
-        # cleanly without dumping a traceback.
         raise SystemExit(1) from exc
 
 

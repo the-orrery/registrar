@@ -12,9 +12,7 @@ def git_status(path: Path) -> GitStatus:
     if not path.exists():
         return GitStatus(is_repo=False, branch="", dirty=False, untracked_count=0)
 
-    status = _git(
-        path, "status", "--porcelain=v1", "--branch", "--untracked-files=normal"
-    )
+    status = _git(path, "status", "--porcelain=v1", "--branch", "--untracked-files=normal")
     if status.returncode != 0:
         return GitStatus(is_repo=False, branch="", dirty=False, untracked_count=0)
 

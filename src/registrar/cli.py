@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from orrery_heartbeat import check_update
 
 from . import __version__
 from .apply import apply_relocate
@@ -43,8 +44,6 @@ from .worktree_lifecycle import (
     audit_worktrees,
     closeout_worktree,
 )
-
-from orrery_heartbeat import check_update
 
 app = typer.Typer(
     add_completion=False,

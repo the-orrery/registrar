@@ -156,6 +156,11 @@ wheels = [
 ]
 
 [[package]]
+name = "orrery-heartbeat"
+version = "0.1.0"
+source = { git = "https://github.com/the-orrery/orrery-heartbeat.git#fff4587e279275f6c452891f6bb34fb537543cc3" }
+
+[[package]]
 name = "packaging"
 version = "26.2"
 source = { registry = "https://pypi.org/simple" }
@@ -386,6 +391,7 @@ name = "registrar"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "orrery-heartbeat" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -405,6 +411,7 @@ freeze = [
 
 [package.metadata]
 requires-dist = [
+    { name = "orrery-heartbeat", git = "https://github.com/the-orrery/orrery-heartbeat.git" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.12" },
 ]

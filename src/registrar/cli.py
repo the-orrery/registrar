@@ -44,6 +44,8 @@ from .worktree_lifecycle import (
     closeout_worktree,
 )
 
+from orrery_heartbeat import check_update
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
@@ -768,6 +770,7 @@ def _consume_tier(argv: list[str]) -> list[str]:
 
 
 def run() -> None:
+    check_update("registrar", "the-orrery/registrar")
     argv = _consume_tier(sys.argv[1:])
     sys.argv = [sys.argv[0], *argv]
     try:

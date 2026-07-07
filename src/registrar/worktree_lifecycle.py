@@ -14,6 +14,7 @@ from .errors import RegistrarError
 from .git import commit_registry_change, git_status
 from .model import API_VERSION, TOMBSTONE_KIND, RegistryAsset
 from .registry import by_name_or_path
+from .worktree import PERSONAL_PREFIXES, WORK_PREFIXES
 
 WORKTREE_KIND = "Worktree"
 OWNER_CLOSED_TYPES = {"completed", "canceled"}
@@ -116,7 +117,7 @@ def audit_worktrees(
         owner_ref=owner_ref,
         include_retired=include_retired,
     )
-    owner_cache: dict[str, OwnerInfo] = {}
+    owner_cache: dict[tuple[str, str], OwnerInfo] = {}
     return [
         _audit_record(record, workspace_root, owner_cache)
         for record in selected
@@ -248,14 +249,15 @@ def _is_auditable(record: RegistryAsset, include_retired: bool) -> bool:
 def _audit_record(
     record: RegistryAsset,
     workspace_root: Path,
-    owner_cache: dict[str, OwnerInfo],
+    owner_cache: dict[tuple[str, str], OwnerInfo],
 ) -> WorktreeAuditItem:
     path = _record_path(record, workspace_root)
     path_state = "exists" if path.exists() else "missing"
     git = git_status(path)
     default_branch = _default_branch(path) if git.is_repo else ""
     branch_state = _branch_state(path, git.branch, default_branch) if git.is_repo else "not-repo"
-    owner = _owner_info(record.spec.owner_ref, owner_cache)
+    world = record.labels.get("world", "")
+    owner = _owner_info(record.spec.owner_ref, owner_cache, world=world)
     recommendation, blocker = _recommend(record, path_state, owner, git.dirty, git.untracked_count, branch_state)
     return WorktreeAuditItem(
         name=record.name,
@@ -283,20 +285,39 @@ def _record_path(record: RegistryAsset, workspace_root: Path) -> Path:
     return Path(record.labels.get("old_path", str(workspace_root / record.name))).expanduser()
 
 
-def _owner_info(owner_ref: str, cache: dict[str, OwnerInfo]) -> OwnerInfo:
+def _owner_info(
+    owner_ref: str, cache: dict[tuple[str, str], OwnerInfo], world: str = ""
+) -> OwnerInfo:
     if not owner_ref:
         return OwnerInfo(ref="", state="missing")
     if owner_ref.startswith("none:"):
         return OwnerInfo(ref=owner_ref, state="none", status=owner_ref)
-    if owner_ref not in cache:
-        cache[owner_ref] = _read_docket_owner(owner_ref)
-    return cache[owner_ref]
+    docket_tier = _docket_tier_for(owner_ref, world)
+    cache_key = (docket_tier, owner_ref)
+    if cache_key not in cache:
+        cache[cache_key] = _read_docket_owner(owner_ref, docket_tier=docket_tier)
+    return cache[cache_key]
 
 
-def _read_docket_owner(owner_ref: str) -> OwnerInfo:
+def _docket_tier_for(owner_ref: str, world: str) -> str:
+    if world in {"personal", "work"}:
+        return world
+    prefix = owner_ref.split("-", maxsplit=1)[0]
+    if prefix in WORK_PREFIXES:
+        return "work"
+    if prefix in PERSONAL_PREFIXES:
+        return "personal"
+    return ""
+
+
+def _read_docket_owner(owner_ref: str, *, docket_tier: str = "") -> OwnerInfo:
+    cmd = ["docket"]
+    if docket_tier:
+        cmd.extend(["--tier", docket_tier])
+    cmd.extend(["show", owner_ref])
     try:
         result = subprocess.run(
-            ["docket", "show", owner_ref],
+            cmd,
             check=False,
             capture_output=True,
             text=True,

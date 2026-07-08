@@ -42,10 +42,8 @@ def test_worktree_create_dry_run_prints_plan_without_writing(tmp_path: Path) -> 
     assert payload["applied"] is False
     assert payload["world"] == "personal"
     assert payload["branch"] == "task-542-worktree-cli"
-    assert payload["worktree_path"].endswith(
-        "workspace/worktrees/registrar-task-542-worktree-cli"
-    )
-    assert not (workspace / "worktrees" / "registrar-task-542-worktree-cli").exists()
+    assert payload["worktree_path"].endswith("workspace/worktrees/registrar-task-542")
+    assert not (workspace / "worktrees" / "registrar-task-542").exists()
     assert not (registry / "assets").exists()
 
 
@@ -79,8 +77,8 @@ def test_worktree_create_creates_git_worktree_and_registry_record(
         ],
     )
 
-    worktree = workspace / "worktrees" / "registrar-task-542-worktree-cli"
-    record = registry / "assets" / "worktree-registrar-task-542-worktree-cli.yaml"
+    worktree = workspace / "worktrees" / "registrar-task-542"
+    record = registry / "assets" / "worktree-registrar-task-542.yaml"
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["applied"] is True
@@ -88,6 +86,45 @@ def test_worktree_create_creates_git_worktree_and_registry_record(
     assert record.exists()
     assert "owner_ref: TASK-542" in record.read_text(encoding="utf-8")
     assert "world: personal" in record.read_text(encoding="utf-8")
+
+
+def test_worktree_create_uses_slug_for_path_only_when_owner_path_exists(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    (workspace / "worktrees" / "registrar-task-542").mkdir(parents=True)
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "create",
+            str(source),
+            "--owner-ref",
+            "TASK-542",
+            "--world",
+            "personal",
+            "--slug",
+            "worktree-cli",
+            "--dry-run",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["worktree_path"].endswith(
+        "workspace/worktrees/registrar-task-542-worktree-cli"
+    )
 
 
 def test_worktree_create_rejects_unowned_without_breakglass(
@@ -1036,7 +1073,7 @@ def test_worktree_create_auto_commits_record_when_registry_is_git_repo(
         ],
     )
 
-    record = registry / "assets" / "worktree-registrar-task-542-worktree-cli.yaml"
+    record = registry / "assets" / "worktree-registrar-task-542.yaml"
     assert result.exit_code == 0
     assert record.exists()
     tracked = subprocess.run(

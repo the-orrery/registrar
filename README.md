@@ -74,6 +74,13 @@ registrar worktree register <worktree-path> --owner-ref TASK-542
 `none:<reason>` 只用于明确临时例外，必须额外传 `--allow-unowned`。`world` 会优先从
 source repo registry/path 或 issue prefix 推导；推不出来时再传 `--world personal|work`。
 
+默认 worktree 目录名是 `<source-repo>-<owner-ref>`，例如
+`registrar-TASK-542` 会落成 `$REGISTRAR_WORKSPACE_ROOT/worktrees/registrar-task-542`。
+`source-repo` 优先取 GitHub remote 的仓库名，取不到才用本地目录名。`--slug` 仍可用于
+生成更具体的分支名；目录名只有在同 repo + issue 的默认目录已经存在时，才把 slug 作为
+冲突逃生后缀。研发脚本、SQL、日志摘录和验证材料不要塞在 worktree 里长期保存，应落到
+对应 issue 的 `docket artifact` repo。
+
 当 registry root 位于 git work tree 时，`create` / `register` / `closeout` 会自动把
 **单个**记录文件 commit 进 registry 仓（pathspec 限定，不会把无关脏改扫进提交）；
 registry 不在 git 仓内时此步为 no-op。

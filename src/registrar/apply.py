@@ -148,7 +148,7 @@ def _check_preconditions(name: str, source: Path, target: Path) -> None:
 
 def _move(source: Path, target: Path) -> None:
     try:
-        os.rename(source, target)
+        source.rename(target)
     except OSError:
         shutil.move(str(source), str(target))
 
@@ -199,8 +199,8 @@ def _rewrite_text(
 def _rewrite_symlink(
     link: Path, source: Path, target: Path, backups: dict[Path, str]
 ) -> bool:
-    raw = os.readlink(link)
-    old_target = Path(raw) if os.path.isabs(raw) else link.parent / raw
+    raw = str(link.readlink())
+    old_target = Path(raw) if Path(raw).is_absolute() else link.parent / raw
     old_target = Path(os.path.normpath(old_target))
     try:
         inner = old_target.relative_to(source)

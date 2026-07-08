@@ -125,7 +125,7 @@ def audit_worktrees(
     ]
 
 
-def closeout_worktree(
+def closeout_worktree(  # noqa: PLR0913
     records: list[RegistryAsset],
     asset: str,
     workspace_root: Path,
@@ -355,7 +355,7 @@ def _read_docket_owner(owner_ref: str, *, docket_tier: str = "") -> OwnerInfo:
     )
 
 
-def _recommend(
+def _recommend(  # noqa: PLR0913, PLR0911
     record: RegistryAsset,
     path_state: str,
     owner: OwnerInfo,

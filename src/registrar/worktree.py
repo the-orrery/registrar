@@ -112,7 +112,7 @@ def resolve_worktree_owner(
     )
 
 
-def plan_create_worktree(
+def plan_create_worktree(  # noqa: PLR0913
     repo_path: Path,
     owner_ref: str,
     workspace_root: Path,
@@ -173,7 +173,7 @@ def plan_create_worktree(
     )
 
 
-def plan_register_worktree(
+def plan_register_worktree(  # noqa: PLR0913
     worktree_path: Path,
     owner_ref: str,
     workspace_root: Path,
@@ -372,9 +372,12 @@ def _infer_world(
             parts = source_path.resolve().relative_to(workspace_root.resolve()).parts
         except ValueError:
             parts = ()
-        if len(parts) >= 2 and parts[0] in {"sources", "knowledge", "data"}:
-            if parts[1] in {"personal", "work"}:
-                return parts[1]
+        if (
+            len(parts) >= 2
+            and parts[0] in {"sources", "knowledge", "data"}
+            and parts[1] in {"personal", "work"}
+        ):  # noqa: PLR2004
+            return parts[1]
     prefix = owner_ref.split("-", maxsplit=1)[0]
     if prefix in WORK_PREFIXES:
         return "work"
@@ -428,7 +431,7 @@ def _ensure_worktree_target(
         rel = path.resolve().relative_to(workspace_root.resolve())
     except ValueError as exc:
         raise RegistrarError(f"worktree path is outside workspace: {path}") from exc
-    if len(rel.parts) < 2 or rel.parts[0] != "worktrees":
+    if len(rel.parts) < 2 or rel.parts[0] != "worktrees":  # noqa: PLR2004
         raise RegistrarError(
             f"worktree path must be under {workspace_root / 'worktrees'}"
         )

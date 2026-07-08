@@ -741,7 +741,7 @@ def _load_tiers() -> dict[str, dict[str, str]]:
         return {}
     import tomllib
 
-    with open(p, "rb") as f:
+    with p.open("rb") as f:
         data = tomllib.load(f)
     result: dict[str, dict[str, str]] = {}
     tiers = data.get("tiers", {})
@@ -814,7 +814,7 @@ def _required_registry_root(registry_root: Path | None) -> Path:
 
 
 def _git_cell(dirty: bool, branch: str) -> str:
-    if len(branch) > 32:
+    if len(branch) > 32:  # noqa: PLR2004
         branch = f"{branch[:29]}..."
     suffix = "*" if dirty else ""
     return f"{branch or '-'}{suffix}"

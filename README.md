@@ -22,6 +22,7 @@ registrar closeout --dry-run <asset-name-or-path>
 registrar worktree create <repo-path> --owner-ref <ISSUE>
 registrar worktree register <worktree-path> --owner-ref <ISSUE>
 registrar worktree audit
+registrar worktree reconcile <ISSUE> --alias <DISPLAY-ID> --format json
 registrar worktree remove <worktree-name-or-path> --apply
 ```
 
@@ -81,10 +82,17 @@ registry 不在 git 仓内时此步为 no-op。
 
 ```sh
 registrar worktree audit --owner-ref TASK-542
+registrar worktree reconcile TASK-542 --alias PM-542 --format json
 registrar worktree closeout <worktree-name-or-path> --dry-run
 registrar worktree closeout <worktree-name-or-path> --apply
 registrar worktree remove   <worktree-name-or-path> --apply   # closeout 的别名
 ```
+
+`reconcile` 是 issue 关闭前的机器闸：给定 canonical owner_ref 和可选显示别名
+（例如同一个 issue 的 `WORK-903` / `ERI-903`），它会列出仍挂在该 owner 下的
+active worktree，并返回每个 worktree 的 `close_gate_state` 与下一步
+`close_gate_action`。`docket finish` / `docket status Done|Canceled` 会调用这个
+命令；如果还有未收口 worktree，先按 action 合并或删除工作树，再关闭 issue。
 
 `remove` 是 `closeout` 的别名，便于发现；它**不是** raw `git worktree remove`，
 而是同一套受闸的生命周期收口（查 issue owner、判分支是否合并、写 finalizers）。

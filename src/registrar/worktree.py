@@ -373,10 +373,10 @@ def _infer_world(
         except ValueError:
             parts = ()
         if (
-            len(parts) >= 2
+            len(parts) >= 2  # noqa: PLR2004
             and parts[0] in {"sources", "knowledge", "data"}
             and parts[1] in {"personal", "work"}
-        ):  # noqa: PLR2004
+        ):
             return parts[1]
     prefix = owner_ref.split("-", maxsplit=1)[0]
     if prefix in WORK_PREFIXES:

@@ -132,13 +132,13 @@ def plan_create_worktree(  # noqa: PLR0913
     _ensure_git_repo(source_path, "source repo")
 
     owner = _normalize_owner_ref(owner_ref, allow_unowned=allow_unowned)
-    name = source_repo.strip() or source_path.name
+    name = _source_repo_name(source_path, source_repo)
     inferred_world = _infer_world(owner, source_path, records, workspace_root, world)
     branch_name = _normalize_branch(branch or _default_branch(owner, slug))
     worktree_path = (
         path.expanduser().resolve()
         if path is not None
-        else (workspace_root / "worktrees" / f"{name}-{branch_name}").resolve()
+        else _default_worktree_path(workspace_root, name, owner, slug)
     )
     _ensure_worktree_target(worktree_path, workspace_root, must_exist=False)
 
@@ -348,6 +348,27 @@ def _default_branch(owner_ref: str, slug: str) -> str:
     branch = owner_ref.lower().replace("_", "-")
     suffix = _slugify(slug)
     return f"{branch}-{suffix}" if suffix else branch
+
+
+def _source_repo_name(source_path: Path, override: str) -> str:
+    return override.strip() or _remote_repo_name(source_path) or source_path.name
+
+
+def _default_worktree_path(
+    workspace_root: Path, source_repo: str, owner_ref: str, slug: str
+) -> Path:
+    repo_slug = _slugify(source_repo)
+    owner_slug = _slugify(owner_ref)
+    if not repo_slug:
+        raise RegistrarError(
+            f'cannot derive worktree name from source repo "{source_repo}"'
+        )
+    base_name = f"{repo_slug}-{owner_slug}"
+    path = (workspace_root / "worktrees" / base_name).resolve()
+    suffix = _slugify(slug)
+    if path.exists() and suffix:
+        return (workspace_root / "worktrees" / f"{base_name}-{suffix}").resolve()
+    return path
 
 
 def _normalize_branch(branch: str) -> str:

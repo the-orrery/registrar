@@ -587,6 +587,124 @@ def test_worktree_audit_counts_untracked_files(tmp_path: Path) -> None:
     [item] = json.loads(result.stdout)
     assert item["untracked_count"] == 1
     assert item["recommendation"] == "blocked: untracked"
+    assert item["close_gate_state"] == "untracked"
+
+
+def test_worktree_reconcile_blocks_owner_close_until_worktree_closed(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    worktree = workspace / "worktrees" / "registrar-task-542"
+    _run(
+        "git",
+        "-C",
+        str(source),
+        "worktree",
+        "add",
+        "-b",
+        "task-542",
+        str(worktree),
+        "HEAD",
+    )
+    registry = tmp_path / "registry"
+    _write_worktree_record(registry, worktree, "TASK-542")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "reconcile",
+            "TASK-542",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RegistrarError)
+    payload = json.loads(result.stdout)
+    assert payload["blocked"] is True
+    assert payload["active_count"] == 1
+    assert payload["ready_to_close_count"] == 1
+    [item] = payload["items"]
+    assert item["name"] == "registrar-task-542"
+    assert item["close_gate_state"] == "ready-to-close"
+    assert "registrar worktree closeout registrar-task-542" in item["close_gate_action"]
+
+
+def test_worktree_reconcile_accepts_owner_alias(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    worktree = workspace / "worktrees" / "registrar-task-542"
+    _run(
+        "git",
+        "-C",
+        str(source),
+        "worktree",
+        "add",
+        "-b",
+        "task-542",
+        str(worktree),
+        "HEAD",
+    )
+    registry = tmp_path / "registry"
+    _write_worktree_record(registry, worktree, "TASK-542")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "reconcile",
+            "ISSUE-542",
+            "--alias",
+            "TASK-542",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["owner_refs"] == ["ISSUE-542", "TASK-542"]
+    assert payload["active_count"] == 1
+
+
+def test_worktree_reconcile_allows_owner_without_worktrees(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "reconcile",
+            "TASK-542",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["blocked"] is False
+    assert payload["active_count"] == 0
 
 
 def test_worktree_closeout_apply_removes_worktree_and_active_record(

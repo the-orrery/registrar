@@ -41,8 +41,10 @@ from .worktree import (
 from .worktree_lifecycle import (
     WorktreeAuditItem,
     WorktreeCloseoutResult,
+    WorktreeReconciliation,
     audit_worktrees,
     closeout_worktree,
+    reconcile_owner_worktrees,
 )
 
 app = typer.Typer(
@@ -368,6 +370,45 @@ worktree_app.command(
 )(_worktree_audit)
 
 
+@worktree_app.command("reconcile")
+def _worktree_reconcile(
+    owner_ref: Annotated[
+        str,
+        typer.Argument(help="PM issue owner_ref whose worktrees must be reconciled"),
+    ],
+    aliases: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--alias",
+            help="additional owner_ref alias to match, e.g. canonical and display ids",
+        ),
+    ] = None,
+    include_retired: Annotated[
+        bool,
+        typer.Option("--include-retired", help="include Tombstone worktree records"),
+    ] = False,
+    workspace_root: WorkspaceOpt = None,
+    registry_root: RegistryOpt = None,
+    output_format: FormatOpt = "table",
+) -> None:
+    """check all worktrees attached to an owner before closing its issue."""
+    workspace = expand(workspace_root or default_workspace_root())
+    root = _required_registry_root(registry_root)
+    records = load_registry(root)
+    result = reconcile_owner_worktrees(
+        records,
+        workspace,
+        (owner_ref, *(aliases or [])),
+        include_retired=include_retired,
+    )
+    _render_worktree_reconciliation(result, output_format)
+    if result.blocked:
+        raise RegistrarError(
+            f"{owner_ref}: {result.active_count} active worktree(s) require "
+            "merge or delete before closing owner"
+        )
+
+
 @worktree_app.command("owner")
 def _worktree_owner(
     path: Annotated[Path, typer.Argument(help="worktree path or path inside it")],
@@ -637,6 +678,7 @@ def _render_worktree_audit(
             "git": _git_cell(item.dirty, item.branch)
             + (f" +{item.untracked_count}?" if item.untracked_count else ""),
             "recommendation": item.recommendation,
+            "close_gate": item.close_gate_state,
         }
         for item in items
     ]
@@ -652,7 +694,62 @@ def _render_worktree_audit(
                 "branch_state",
                 "git",
                 "recommendation",
+                "close_gate",
             ],
+        )
+    )
+
+
+def _render_worktree_reconciliation(
+    result: WorktreeReconciliation,
+    output_format: str,
+) -> None:
+    if output_format == "json":
+        print(render_json(result))
+        return
+    if output_format != "table":
+        raise RegistrarError("--format must be table or json")
+    rows = [
+        {
+            "name": item.name,
+            "owner": item.owner_ref or "-",
+            "path": item.path_state,
+            "branch": item.branch or "-",
+            "branch_state": item.branch_state,
+            "close_gate": item.close_gate_state,
+            "next_action": item.close_gate_action,
+        }
+        for item in result.items
+    ]
+    if rows:
+        print(
+            table(
+                rows,
+                [
+                    "name",
+                    "owner",
+                    "path",
+                    "branch",
+                    "branch_state",
+                    "close_gate",
+                    "next_action",
+                ],
+            )
+        )
+    print(
+        table(
+            [
+                {"field": "owner_refs", "value": ", ".join(result.owner_refs)},
+                {"field": "blocked", "value": str(result.blocked).lower()},
+                {"field": "active_count", "value": str(result.active_count)},
+                {
+                    "field": "ready_to_close",
+                    "value": str(result.ready_to_close_count),
+                },
+                {"field": "blocked_count", "value": str(result.blocked_count)},
+                {"field": "stale_count", "value": str(result.stale_count)},
+            ],
+            ["field", "value"],
         )
     )
 

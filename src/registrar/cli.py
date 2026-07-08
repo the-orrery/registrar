@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from orrery_heartbeat import check_update
 
 from . import __version__
 from .apply import apply_relocate
@@ -43,8 +44,6 @@ from .worktree_lifecycle import (
     audit_worktrees,
     closeout_worktree,
 )
-
-from orrery_heartbeat import check_update
 
 app = typer.Typer(
     add_completion=False,
@@ -100,7 +99,7 @@ def _callback(
     registry_root: RegistryOpt = None,
     version: bool = typer.Option(False, "--version", help="print version and exit"),
 ) -> None:
-    global _GLOBAL_REGISTRY_ROOT  # noqa: PLW0603
+    global _GLOBAL_REGISTRY_ROOT
     _GLOBAL_REGISTRY_ROOT = registry_root
     if version:
         print(__version__)
@@ -789,8 +788,7 @@ def _registry_root(registry_root: Path | None) -> Path:
 
 
 def _required_registry_root(registry_root: Path | None) -> Path:
-    root = _registry_root(registry_root)
-    return root
+    return _registry_root(registry_root)
 
 
 def _git_cell(dirty: bool, branch: str) -> str:

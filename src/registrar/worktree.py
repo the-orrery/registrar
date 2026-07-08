@@ -17,6 +17,7 @@ from .model import API_VERSION, TOMBSTONE_KIND, RegistryAsset
 from .paths import current_placement
 from .registry import derive_identity
 
+
 def _load_prefix_sets() -> tuple[set[str], set[str]]:
     """Load owner-ref prefix→world mapping from env or defaults."""
     work = os.environ.get("REGISTRAR_WORK_PREFIXES", "")
@@ -335,8 +336,7 @@ def _normalize_branch(branch: str) -> str:
 def _slugify(value: str) -> str:
     raw = value.strip().lower().replace("_", "-")
     raw = re.sub(r"[^a-z0-9.-]+", "-", raw)
-    raw = re.sub(r"-+", "-", raw).strip("-")
-    return raw
+    return re.sub(r"-+", "-", raw).strip("-")
 
 
 def _infer_world(

@@ -47,7 +47,7 @@ def current_placement(path: Path, workspace_root: Path) -> str:
     if not rel.parts:
         return "workspace/root"
     parent = rel.parent
-    if parent == Path("."):
+    if parent == Path():
         return "workspace/root"
     return f"workspace/{parent.as_posix()}"
 

@@ -87,6 +87,7 @@ class AssetSpec:
     capability_type: str = ""
     exposures: tuple[CapabilityExposure, ...] = ()
     implementation_refs: tuple[str, ...] = ()
+    owner_uid: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -95,6 +96,8 @@ class AssetSpec:
             "placement": self.placement,
             "restore_policy": self.restore_policy,
         }
+        if self.owner_uid:
+            data["owner_uid"] = self.owner_uid
         if self.allowed_actions:
             data["allowed_actions"] = list(self.allowed_actions)
         if self.closeout_policy:

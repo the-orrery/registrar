@@ -31,12 +31,14 @@ def run_doctor(  # noqa: C901
             ):
                 record = candidate
         if record is None:
-            next_action = "add a registry record with spec.owner_ref set to a PM issue"
+            next_action = (
+                "add a registry record with spec.owner_ref set to a docket issue ref"
+            )
             if observation.current_placement == "workspace/worktrees":
                 next_action = (
                     "create or reuse a docket issue, then run "
                     "registrar worktree register "
-                    f"{observation.path} --owner-ref <PM-ISSUE>"
+                    f"{observation.path} --owner-ref <ISSUE-REF>"
                 )
             findings.append(
                 Finding(
@@ -56,7 +58,7 @@ def run_doctor(  # noqa: C901
                     dirty_next_action = (
                         "create or reuse a docket issue, then run "
                         "registrar worktree register "
-                        f"{observation.path} --owner-ref <PM-ISSUE>"
+                        f"{observation.path} --owner-ref <ISSUE-REF>"
                     )
                 findings.append(
                     Finding(
@@ -109,7 +111,7 @@ def _check_record_vs_observation(
                 name=record.name,
                 path=record.path,
                 reason="registry record has empty spec.owner_ref",
-                next_action="set owner_ref to a PM issue",
+                next_action="set owner_ref to a docket issue ref",
             )
         )
     if record.spec.placement and record.spec.placement != observed_placement:

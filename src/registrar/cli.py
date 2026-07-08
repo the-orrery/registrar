@@ -30,9 +30,11 @@ from .render import render_json, table
 from .seed import render_seed_yaml, seed_documents
 from .worktree import (
     WorktreeOwner,
+    WorktreeOwnerMigration,
     WorktreePlan,
     apply_create_worktree,
     apply_register_worktree,
+    migrate_worktree_owner_uids,
     plan_create_worktree,
     plan_register_worktree,
     render_document_yaml,
@@ -224,7 +226,7 @@ def _worktree_create(
     repo_path: Annotated[Path, typer.Argument(help="source repo path")],
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="PM issue like PROJ-542"),
+        typer.Option("--owner-ref", help="docket issue ref or uid, e.g. WORK-12"),
     ],
     slug: Annotated[
         str,
@@ -288,7 +290,7 @@ def _worktree_register(
     worktree_path: Annotated[Path, typer.Argument(help="existing worktree path")],
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="PM issue like PROJ-542"),
+        typer.Option("--owner-ref", help="docket issue ref or uid, e.g. WORK-12"),
     ],
     world: Annotated[
         str,
@@ -340,7 +342,7 @@ def _worktree_audit(
     ] = None,
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="filter by PM issue owner_ref"),
+        typer.Option("--owner-ref", help="filter by docket issue ref or uid"),
     ] = "",
     include_retired: Annotated[
         bool,
@@ -370,17 +372,35 @@ worktree_app.command(
 )(_worktree_audit)
 
 
+@worktree_app.command("migrate-owners")
+def _worktree_migrate_owners(
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="preview owner_uid backfill without writing"),
+    ] = False,
+    registry_root: RegistryOpt = None,
+    output_format: FormatOpt = "table",
+) -> None:
+    """backfill owner_uid on existing Worktree registry records."""
+    root = _required_registry_root(registry_root)
+    records = load_registry(root)
+    results = migrate_worktree_owner_uids(records, dry_run=dry_run)
+    _render_worktree_owner_migrations(results, output_format)
+
+
 @worktree_app.command("reconcile")
 def _worktree_reconcile(
     owner_ref: Annotated[
         str,
-        typer.Argument(help="PM issue owner_ref whose worktrees must be reconciled"),
+        typer.Argument(
+            help="docket issue ref or uid whose worktrees must be reconciled"
+        ),
     ],
     aliases: Annotated[
         list[str] | None,
         typer.Option(
             "--alias",
-            help="additional owner_ref alias to match, e.g. canonical and display ids",
+            help="additional owner alias to match, e.g. legacy id and display refs",
         ),
     ] = None,
     include_retired: Annotated[
@@ -646,6 +666,7 @@ def _render_worktree_plan(plan: WorktreePlan, output_format: str) -> None:
                 {"field": "action", "value": plan.action},
                 {"field": "applied", "value": str(plan.applied).lower()},
                 {"field": "owner_ref", "value": plan.owner_ref},
+                {"field": "owner_uid", "value": plan.owner_uid or "-"},
                 {"field": "world", "value": plan.world},
                 {"field": "source_repo", "value": plan.source_repo},
                 {"field": "worktree_path", "value": str(plan.worktree_path)},
@@ -698,6 +719,33 @@ def _render_worktree_audit(
             ],
         )
     )
+
+
+def _render_worktree_owner_migrations(
+    items: list[WorktreeOwnerMigration],
+    output_format: str,
+) -> None:
+    if output_format == "json":
+        print(render_json(items))
+        return
+    if output_format != "table":
+        raise RegistrarError("--format must be table or json")
+    rows = [
+        {
+            "name": item.name,
+            "status": item.status,
+            "applied": str(item.applied).lower(),
+            "owner_ref": (
+                item.before_owner_ref
+                if item.before_owner_ref == item.after_owner_ref
+                else f"{item.before_owner_ref} -> {item.after_owner_ref}"
+            ),
+            "owner_uid": item.after_owner_uid or "-",
+            "file": str(item.source_file) if item.source_file else "-",
+        }
+        for item in items
+    ]
+    print(table(rows, ["name", "status", "applied", "owner_ref", "owner_uid", "file"]))
 
 
 def _render_worktree_reconciliation(
@@ -765,6 +813,7 @@ def _render_worktree_owner(owner: WorktreeOwner, output_format: str) -> None:
             [
                 {"field": "found", "value": str(owner.found).lower()},
                 {"field": "owner_ref", "value": owner.owner_ref or "-"},
+                {"field": "owner_uid", "value": owner.owner_uid or "-"},
                 {"field": "path", "value": str(owner.path)},
                 {
                     "field": "record_path",

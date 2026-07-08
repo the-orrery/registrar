@@ -90,6 +90,76 @@ def test_worktree_create_creates_git_worktree_and_registry_record(
     assert "world: personal" in record.read_text(encoding="utf-8")
 
 
+def test_worktree_create_rejects_unowned_without_breakglass(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "create",
+            str(source),
+            "--owner-ref",
+            "none:temporary",
+            "--world",
+            "personal",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RegistrarError)
+    assert "create or reuse a docket issue" in result.exception.message
+    assert "--allow-unowned" in result.exception.message
+
+
+def test_worktree_create_allows_unowned_with_breakglass(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "create",
+            str(source),
+            "--owner-ref",
+            "none:temporary",
+            "--allow-unowned",
+            "--world",
+            "personal",
+            "--slug",
+            "scratch",
+            "--dry-run",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["owner_ref"] == "none:temporary"
+    assert payload["branch"] == "none-temporary-scratch"
+
+
 def test_worktree_register_writes_existing_worktree_record(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     source = _git_repo(workspace / "projects" / "services" / "collector")
@@ -134,6 +204,49 @@ def test_worktree_register_writes_existing_worktree_record(tmp_path: Path) -> No
     assert payload["source_repo"] == "collector"
     assert record.exists()
     assert "issue: TEAM-588" in record.read_text(encoding="utf-8")
+
+
+def test_worktree_register_rejects_unowned_without_breakglass(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "services" / "collector")
+    worktree = workspace / "worktrees" / "collector-scratch"
+    _run(
+        "git",
+        "-C",
+        str(source),
+        "worktree",
+        "add",
+        "-b",
+        "scratch",
+        str(worktree),
+        "HEAD",
+    )
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "register",
+            str(worktree),
+            "--owner-ref",
+            "none:temporary",
+            "--world",
+            "personal",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RegistrarError)
+    assert "create or reuse a docket issue" in result.exception.message
 
 
 def test_worktree_register_rejects_non_worktree_path(tmp_path: Path) -> None:
@@ -261,6 +374,8 @@ def test_doctor_points_unowned_worktrees_to_register_command(tmp_path: Path) -> 
         item for item in findings if item["name"] == "registrar-task-542"
     )
     assert "registrar worktree register" in worktree_finding["next_action"]
+    assert "<PM-ISSUE>" in worktree_finding["next_action"]
+    assert "none:" not in worktree_finding["next_action"]
 
 
 def test_worktree_audit_reports_registered_worktree_state(tmp_path: Path) -> None:
@@ -311,6 +426,45 @@ def test_worktree_audit_reports_registered_worktree_state(tmp_path: Path) -> Non
         "completed",
         "canceled",
     }
+
+
+def test_worktree_list_alias_reports_registered_worktree_state(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    worktree = workspace / "worktrees" / "registrar-task-542"
+    _run(
+        "git",
+        "-C",
+        str(source),
+        "worktree",
+        "add",
+        "-b",
+        "task-542",
+        str(worktree),
+        "HEAD",
+    )
+    registry = tmp_path / "registry"
+    _write_worktree_record(registry, worktree, "TASK-542")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "list",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    [item] = json.loads(result.stdout)
+    assert item["name"] == "registrar-task-542"
+    assert item["owner_ref"] == "TASK-542"
 
 
 def test_worktree_owner_reports_registered_owner_for_nested_path(

@@ -222,7 +222,7 @@ def _worktree_create(
     repo_path: Annotated[Path, typer.Argument(help="source repo path")],
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="PM issue like PROJ-542 or none:<reason>"),
+        typer.Option("--owner-ref", help="PM issue like PROJ-542"),
     ],
     slug: Annotated[
         str,
@@ -244,6 +244,13 @@ def _worktree_create(
         str,
         typer.Option("--source-repo", help="override source repo label"),
     ] = "",
+    allow_unowned: Annotated[
+        bool,
+        typer.Option(
+            "--allow-unowned",
+            help="allow explicit break-glass owner_ref none:<reason>",
+        ),
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="print plan only; do not create or write"),
@@ -267,6 +274,7 @@ def _worktree_create(
         path=path,
         world=world,
         source_repo=source_repo,
+        allow_unowned=allow_unowned,
     )
     if not dry_run:
         plan = apply_create_worktree(plan)
@@ -278,7 +286,7 @@ def _worktree_register(
     worktree_path: Annotated[Path, typer.Argument(help="existing worktree path")],
     owner_ref: Annotated[
         str,
-        typer.Option("--owner-ref", help="PM issue like PROJ-542 or none:<reason>"),
+        typer.Option("--owner-ref", help="PM issue like PROJ-542"),
     ],
     world: Annotated[
         str,
@@ -288,6 +296,13 @@ def _worktree_register(
         str,
         typer.Option("--source-repo", help="override source repo label"),
     ] = "",
+    allow_unowned: Annotated[
+        bool,
+        typer.Option(
+            "--allow-unowned",
+            help="allow explicit break-glass owner_ref none:<reason>",
+        ),
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="print plan only; do not write"),
@@ -308,6 +323,7 @@ def _worktree_register(
         records,
         world=world,
         source_repo=source_repo,
+        allow_unowned=allow_unowned,
     )
     if not dry_run:
         plan = apply_register_worktree(plan)
@@ -344,6 +360,12 @@ def _worktree_audit(
         include_retired=include_retired,
     )
     _render_worktree_audit(items, output_format)
+
+
+worktree_app.command(
+    "list",
+    help="alias of audit: list registered worktrees and owner lifecycle state.",
+)(_worktree_audit)
 
 
 @worktree_app.command("owner")

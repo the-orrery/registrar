@@ -31,11 +31,12 @@ def run_doctor(  # noqa: C901
             ):
                 record = candidate
         if record is None:
-            next_action = "add a registry record or mark owner_ref as none:<reason>"
+            next_action = "add a registry record with spec.owner_ref set to a PM issue"
             if observation.current_placement == "workspace/worktrees":
                 next_action = (
-                    "run registrar worktree register "
-                    f"{observation.path} --owner-ref <ISSUE|none:reason>"
+                    "create or reuse a docket issue, then run "
+                    "registrar worktree register "
+                    f"{observation.path} --owner-ref <PM-ISSUE>"
                 )
             findings.append(
                 Finding(
@@ -48,11 +49,14 @@ def run_doctor(  # noqa: C901
                 )
             )
             if observation.git.dirty:
-                dirty_next_action = "assign owner_ref before closeout or relocation"
+                dirty_next_action = (
+                    "assign a PM issue owner_ref before closeout or relocation"
+                )
                 if observation.current_placement == "workspace/worktrees":
                     dirty_next_action = (
-                        "run registrar worktree register "
-                        f"{observation.path} --owner-ref <ISSUE|none:reason>"
+                        "create or reuse a docket issue, then run "
+                        "registrar worktree register "
+                        f"{observation.path} --owner-ref <PM-ISSUE>"
                     )
                 findings.append(
                     Finding(
@@ -105,7 +109,7 @@ def _check_record_vs_observation(
                 name=record.name,
                 path=record.path,
                 reason="registry record has empty spec.owner_ref",
-                next_action="set owner_ref to a PM issue or none:<reason>",
+                next_action="set owner_ref to a PM issue",
             )
         )
     if record.spec.placement and record.spec.placement != observed_placement:

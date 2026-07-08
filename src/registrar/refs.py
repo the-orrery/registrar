@@ -144,7 +144,7 @@ def _under_preserve(source: Path) -> bool:
     return True
 
 
-def classify_ref(source: Path, kind: str) -> str:
+def classify_ref(source: Path, kind: str) -> str:  # noqa: PLR0911
     """``rewrite`` for live functional pointers, ``preserve`` otherwise.
 
     Symlinks are functional pointers by nature (a dangling link is a bug), so
@@ -284,10 +284,10 @@ def _scan_root(
 
 def _symlink_ref(link: Path, repo_path: Path) -> Ref | None:
     try:
-        raw = os.readlink(link)
+        raw = str(link.readlink())
     except OSError:
         return None
-    target = Path(raw) if os.path.isabs(raw) else link.parent / raw
+    target = Path(raw) if Path(raw).is_absolute() else link.parent / raw
     target = Path(os.path.normpath(target))
     if _is_under(target, repo_path):
         return Ref(

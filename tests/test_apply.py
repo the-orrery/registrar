@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -91,7 +90,7 @@ def test_apply_moves_rewrites_functional_preserves_historical(
 
     # functional refs rewritten to the new path
     assert json.loads(cfg.read_text())["path"] == str(target)
-    assert Path(os.readlink(shim)) == target / "wrapper"
+    assert shim.readlink() == target / "wrapper"
     assert str(target) in plist.read_text()
     assert str(source) not in plist.read_text()
 
@@ -293,7 +292,7 @@ def test_apply_rolls_back_everything_on_failure(tmp_path, monkeypatch) -> None:
     assert source.exists()
     assert not (workspace / "projects" / "team" / "foo").exists()
     assert cfg.read_text() == original_cfg
-    assert Path(os.readlink(shim)) == source / "wrapper"
+    assert shim.readlink() == source / "wrapper"
     assert str(source) in (registry / "foo.yaml").read_text()
     assert (
         str((workspace / "sources").resolve())

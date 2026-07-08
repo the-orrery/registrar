@@ -10,7 +10,7 @@ from .paths import current_placement
 from .registry import index_records
 
 
-def run_doctor(
+def run_doctor(  # noqa: C901
     workspace_root: Path,
     records: list[RegistryAsset],
     external_root: Path | None = None,

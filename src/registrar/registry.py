@@ -117,7 +117,7 @@ def _read_document(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], loaded)
 
 
-def _asset_from_document(data: dict[str, Any], source_file: Path) -> RegistryAsset:
+def _asset_from_document(data: dict[str, Any], source_file: Path) -> RegistryAsset:  # noqa: C901, PLR0912
     api_version = str(data.get("apiVersion", ""))
     if api_version != API_VERSION:
         raise RegistrarError(

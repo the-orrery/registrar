@@ -142,7 +142,7 @@ spec:
         encoding="utf-8",
     )
 
-    with pytest.raises(RegistrarError, match="metadata.path is not allowed"):
+    with pytest.raises(RegistrarError, match=r"metadata\.path is not allowed"):
         load_registry(registry)
 
 
@@ -164,7 +164,7 @@ spec:
         encoding="utf-8",
     )
 
-    with pytest.raises(RegistrarError, match="spec.exposures"):
+    with pytest.raises(RegistrarError, match=r"spec\.exposures"):
         load_registry(registry)
 
 
@@ -190,7 +190,7 @@ spec:
         encoding="utf-8",
     )
 
-    with pytest.raises(RegistrarError, match="metadata.path is not allowed"):
+    with pytest.raises(RegistrarError, match=r"metadata\.path is not allowed"):
         load_registry(registry)
 
 
@@ -245,7 +245,7 @@ spec:
         by_name_or_path(records, "capabilities/personal/cli/proxy-route").kind
         == "Capability"
     )
-    with pytest.raises(RegistrarError, match="ambiguous metadata.name"):
+    with pytest.raises(RegistrarError, match=r"ambiguous metadata\.name"):
         by_name_or_path(records, "proxy-route")
 
 
@@ -308,7 +308,7 @@ spec:
     assert by_name_or_path(records, "platform-kb").to_dict()["metadata"]["aliases"] == [
         "platform-kb"
     ]
-    with pytest.raises(RegistrarError, match="ambiguous metadata.name"):
+    with pytest.raises(RegistrarError, match=r"ambiguous metadata\.name"):
         by_name_or_path(records, "platform")
 
 
@@ -340,7 +340,7 @@ spec:
             encoding="utf-8",
         )
 
-    with pytest.raises(RegistrarError, match="duplicate metadata.aliases"):
+    with pytest.raises(RegistrarError, match=r"duplicate metadata\.aliases"):
         load_registry(registry)
 
 
@@ -387,7 +387,7 @@ spec:
         encoding="utf-8",
     )
 
-    with pytest.raises(RegistrarError, match="collides with metadata.name"):
+    with pytest.raises(RegistrarError, match=r"collides with metadata\.name"):
         load_registry(registry)
 
 
@@ -417,7 +417,7 @@ spec:
             encoding="utf-8",
         )
 
-    with pytest.raises(RegistrarError, match="duplicate metadata.identity"):
+    with pytest.raises(RegistrarError, match=r"duplicate metadata\.identity"):
         load_registry(registry)
 
 

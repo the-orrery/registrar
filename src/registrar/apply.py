@@ -23,6 +23,7 @@ Safety properties:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -83,7 +84,7 @@ def apply_relocate(
         target.parent.mkdir(parents=True, exist_ok=True)
         _move(source, target)
         moved = True
-    except Exception as exc:  # noqa: BLE001 - roll back any failure, then re-raise
+    except Exception as exc:
         _rollback(text_backups, symlink_backups, source, target, moved=moved)
         raise RegistrarError(
             f"{plan.name}: apply failed and was rolled back ({exc})"
@@ -165,15 +166,15 @@ def _rewrite_pairs(
     pairs = [(s, t)]
     home = str(_home())
     if s.startswith(home + os.sep) and t.startswith(home + os.sep):
-        s_rel, t_rel = s[len(home):], t[len(home):]
+        s_rel, t_rel = s[len(home) :], t[len(home) :]
         for prefix in ("${HOME}", "$HOME", "~"):
             pairs.append((prefix + s_rel, prefix + t_rel))
     ws = str(workspace_root)
     if s.startswith(ws + os.sep) and t.startswith(ws + os.sep):
-        s_rel = s[len(ws) + 1:]
+        s_rel = s[len(ws) + 1 :]
         # Mirror path_variants: never rewrite a bare leaf token.
         if os.sep in s_rel:
-            pairs.append((s_rel, t[len(ws) + 1:]))
+            pairs.append((s_rel, t[len(ws) + 1 :]))
     return pairs
 
 
@@ -251,15 +252,11 @@ def _rollback(
     moved: bool,
 ) -> None:
     if moved:
-        try:
+        with contextlib.suppress(OSError):
             _move(target, source)
-        except OSError:
-            pass
     for path, content in text_backups.items():
-        try:
+        with contextlib.suppress(OSError):
             path.write_text(content, encoding="utf-8")
-        except OSError:
-            pass
     for link, raw in symlink_backups.items():
         try:
             if link.is_symlink() or link.exists():

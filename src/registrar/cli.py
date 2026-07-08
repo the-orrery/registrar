@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from orrery_heartbeat import check_update
 
 from . import __version__
 from .apply import apply_relocate
@@ -43,8 +44,6 @@ from .worktree_lifecycle import (
     audit_worktrees,
     closeout_worktree,
 )
-
-from orrery_heartbeat import check_update
 
 app = typer.Typer(
     add_completion=False,
@@ -100,7 +99,7 @@ def _callback(
     registry_root: RegistryOpt = None,
     version: bool = typer.Option(False, "--version", help="print version and exit"),
 ) -> None:
-    global _GLOBAL_REGISTRY_ROOT  # noqa: PLW0603
+    global _GLOBAL_REGISTRY_ROOT
     _GLOBAL_REGISTRY_ROOT = registry_root
     if version:
         print(__version__)
@@ -366,7 +365,9 @@ def _worktree_closeout(
         str,
         typer.Argument(help="registered worktree identity, unique short name, or path"),
     ],
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="plan only; no changes")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="plan only; no changes")
+    ] = False,
     apply: Annotated[
         bool,
         typer.Option("--apply", help="remove worktree and close the active record"),
@@ -452,7 +453,9 @@ def _relocate(
         str,
         typer.Argument(help="registry identity, unique short name, or absolute path"),
     ],
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="plan only; no changes")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="plan only; no changes")
+    ] = False,
     apply: Annotated[
         bool,
         typer.Option("--apply", help="execute the move and rewrite live refs"),
@@ -533,15 +536,29 @@ def _render_relocate_result(result: RelocateResult, output_format: str) -> None:
     print(
         table(
             [
-                {"field": "moved", "value": f"{result.source_path} -> {result.target_path}"},
+                {
+                    "field": "moved",
+                    "value": f"{result.source_path} -> {result.target_path}",
+                },
                 {"field": "rewritten", "value": _refs_cell(result.rewritten_refs)},
-                {"field": "preserved (review)", "value": _refs_cell(result.preserved_refs)},
+                {
+                    "field": "preserved (review)",
+                    "value": _refs_cell(result.preserved_refs),
+                },
                 {
                     "field": "registry_file",
-                    "value": str(result.registry_file) if result.registry_file else "none",
+                    "value": str(result.registry_file)
+                    if result.registry_file
+                    else "none",
                 },
-                {"field": "repos_to_commit", "value": "; ".join(result.repos_to_commit) or "none"},
-                {"field": "launchd_reload", "value": "; ".join(result.launchd_reload) or "none"},
+                {
+                    "field": "repos_to_commit",
+                    "value": "; ".join(result.repos_to_commit) or "none",
+                },
+                {
+                    "field": "launchd_reload",
+                    "value": "; ".join(result.launchd_reload) or "none",
+                },
                 {"field": "verified", "value": str(result.verified).lower()},
                 {"field": "remaining_refs", "value": _refs_cell(result.remaining_refs)},
                 {"field": "rollback", "value": " ; ".join(result.rollback)},
@@ -732,7 +749,11 @@ def _load_tiers() -> dict[str, dict[str, str]]:
         print("error: tiers.toml must define a [tiers] table", file=sys.stderr)
         sys.exit(2)
     for name, cfg in tiers.items():
-        if not isinstance(cfg, dict) or "workspace_root" not in cfg or "registry_root" not in cfg:
+        if (
+            not isinstance(cfg, dict)
+            or "workspace_root" not in cfg
+            or "registry_root" not in cfg
+        ):
             print(
                 f"error: tier '{name}' must define workspace_root and registry_root",
                 file=sys.stderr,
@@ -766,7 +787,7 @@ def _consume_tier(argv: list[str]) -> list[str]:
     cfg = tiers[tier_name]
     os.environ["REGISTRAR_WORKSPACE_ROOT"] = cfg["workspace_root"]
     os.environ["REGISTRAR_REGISTRY_ROOT"] = cfg["registry_root"]
-    return argv[:idx] + argv[idx + 2:]
+    return argv[:idx] + argv[idx + 2 :]
 
 
 def run() -> None:
@@ -789,8 +810,7 @@ def _registry_root(registry_root: Path | None) -> Path:
 
 
 def _required_registry_root(registry_root: Path | None) -> Path:
-    root = _registry_root(registry_root)
-    return root
+    return _registry_root(registry_root)
 
 
 def _git_cell(dirty: bool, branch: str) -> str:

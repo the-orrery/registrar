@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -55,6 +57,8 @@ class WorktreeAuditItem:
     untracked_count: int
     recommendation: str
     blocker: str
+    close_gate_state: str
+    close_gate_action: str
     source_file: Path | None
 
     def to_dict(self) -> dict[str, object]:
@@ -74,7 +78,33 @@ class WorktreeAuditItem:
             "untracked_count": self.untracked_count,
             "recommendation": self.recommendation,
             "blocker": self.blocker,
+            "close_gate_state": self.close_gate_state,
+            "close_gate_action": self.close_gate_action,
             "source_file": str(self.source_file) if self.source_file else "",
+        }
+
+
+@dataclass(frozen=True)
+class WorktreeReconciliation:
+    owner_refs: tuple[str, ...]
+    blocked: bool
+    total: int
+    active_count: int
+    ready_to_close_count: int
+    blocked_count: int
+    stale_count: int
+    items: tuple[WorktreeAuditItem, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "owner_refs": list(self.owner_refs),
+            "blocked": self.blocked,
+            "total": self.total,
+            "active_count": self.active_count,
+            "ready_to_close_count": self.ready_to_close_count,
+            "blocked_count": self.blocked_count,
+            "stale_count": self.stale_count,
+            "items": [item.to_dict() for item in self.items],
         }
 
 
@@ -123,6 +153,49 @@ def audit_worktrees(
         for record in selected
         if _is_auditable(record, include_retired)
     ]
+
+
+def reconcile_owner_worktrees(
+    records: list[RegistryAsset],
+    workspace_root: Path,
+    owner_refs: Sequence[str],
+    *,
+    include_retired: bool = False,
+) -> WorktreeReconciliation:
+    refs = tuple(dict.fromkeys(ref.strip() for ref in owner_refs if ref.strip()))
+    if not refs:
+        raise RegistrarError("worktree reconcile requires at least one owner ref")
+
+    owner_cache: dict[tuple[str, str], OwnerInfo] = {}
+    items = tuple(
+        item
+        for record in _select_worktree_records(
+            records,
+            workspace_root,
+            asset=None,
+            owner_ref="",
+            include_retired=include_retired,
+        )
+        if _is_auditable(record, include_retired)
+        for item in (_audit_record(record, workspace_root, owner_cache),)
+        if _owner_ref_matches(item, refs)
+    )
+    active_items = tuple(item for item in items if item.close_gate_state != "retired")
+    blocked_items = tuple(
+        item for item in active_items if item.close_gate_state not in {"ready-to-close"}
+    )
+    return WorktreeReconciliation(
+        owner_refs=refs,
+        blocked=bool(active_items),
+        total=len(items),
+        active_count=len(active_items),
+        ready_to_close_count=sum(
+            1 for item in active_items if item.close_gate_state == "ready-to-close"
+        ),
+        blocked_count=len(blocked_items),
+        stale_count=sum(1 for item in active_items if item.close_gate_state == "stale"),
+        items=active_items,
+    )
 
 
 def closeout_worktree(  # noqa: PLR0913
@@ -265,6 +338,15 @@ def _audit_record(
     recommendation, blocker = _recommend(
         record, path_state, owner, git.dirty, git.untracked_count, branch_state
     )
+    close_gate_state, close_gate_action = _close_gate(
+        record,
+        path_state,
+        git.dirty,
+        git.untracked_count,
+        branch_state,
+        git.branch,
+        default_branch,
+    )
     return WorktreeAuditItem(
         name=record.name,
         identity=record.identity,
@@ -281,6 +363,8 @@ def _audit_record(
         untracked_count=git.untracked_count,
         recommendation=recommendation,
         blocker=blocker,
+        close_gate_state=close_gate_state,
+        close_gate_action=close_gate_action,
         source_file=record.source_file,
     )
 
@@ -382,6 +466,50 @@ def _recommend(  # noqa: PLR0913, PLR0911
     if branch_state in {"unmerged", "unknown", "detached"}:
         return (f"blocked: branch {branch_state}", "branch")
     return ("closeable", "")
+
+
+def _close_gate(  # noqa: PLR0913
+    record: RegistryAsset,
+    path_state: str,
+    dirty: bool,
+    untracked_count: int,
+    branch_state: str,
+    branch: str,
+    default_branch: str,
+) -> tuple[str, str]:
+    if record.kind == TOMBSTONE_KIND:
+        return ("retired", "already retired")
+    if path_state == "missing":
+        return (
+            "stale",
+            f"registrar worktree closeout {record.name} --apply "
+            "--stale-record --owner-active-ok",
+        )
+    if dirty:
+        return ("dirty", "commit, stash, or discard tracked changes before closeout")
+    if untracked_count:
+        return ("untracked", "remove, commit, or explicitly discard untracked files")
+    if branch_state in {"unmerged", "unknown", "detached", "not-repo"}:
+        return (
+            branch_state,
+            f"merge or discard, then: registrar worktree closeout {record.name} "
+            "--apply --owner-active-ok --allow-unmerged --delete-branch",
+        )
+    command = f"registrar worktree closeout {record.name} --apply --owner-active-ok"
+    if branch and branch != default_branch:
+        command += " --delete-branch"
+    return ("ready-to-close", command)
+
+
+def _owner_ref_matches(item: WorktreeAuditItem, refs: Sequence[str]) -> bool:
+    ref_set = set(refs)
+    if item.owner_ref in ref_set or item.owner_canonical in ref_set:
+        return True
+    return bool(_owner_tokens(item.owner_canonical) & ref_set)
+
+
+def _owner_tokens(text: str) -> set[str]:
+    return set(re.findall(r"[A-Za-z]+-\d+", text))
 
 
 def _closeout_blockers(

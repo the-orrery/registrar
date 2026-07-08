@@ -189,6 +189,7 @@ def _asset_from_document(data: dict[str, Any], source_file: Path) -> RegistryAss
         capability_type=capability_type,
         exposures=tuple(exposures),
         implementation_refs=tuple(str(item) for item in implementation_refs),
+        owner_uid=str(spec_data.get("owner_uid", "")).strip(),
     )
     return RegistryAsset(
         kind=kind,

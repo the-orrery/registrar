@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -32,9 +33,16 @@ WORK_PREFIXES, PERSONAL_PREFIXES = _load_prefix_sets()
 
 
 @dataclass(frozen=True)
+class NormalizedOwner:
+    ref: str
+    uid: str = ""
+
+
+@dataclass(frozen=True)
 class WorktreePlan:
     action: str
     owner_ref: str
+    owner_uid: str
     world: str
     source_repo_path: Path | None
     source_repo: str
@@ -50,6 +58,7 @@ class WorktreePlan:
             "action": self.action,
             "applied": self.applied,
             "owner_ref": self.owner_ref,
+            "owner_uid": self.owner_uid,
             "world": self.world,
             "source_repo_path": (
                 str(self.source_repo_path) if self.source_repo_path else None
@@ -67,6 +76,7 @@ class WorktreePlan:
 class WorktreeOwner:
     found: bool
     owner_ref: str
+    owner_uid: str
     path: Path
     record_path: Path | None = None
     identity: str = ""
@@ -77,11 +87,38 @@ class WorktreeOwner:
         return {
             "found": self.found,
             "owner_ref": self.owner_ref,
+            "owner_uid": self.owner_uid,
             "path": str(self.path),
             "record_path": str(self.record_path) if self.record_path else None,
             "identity": self.identity,
             "name": self.name,
             "lifecycle": self.lifecycle,
+        }
+
+
+@dataclass(frozen=True)
+class WorktreeOwnerMigration:
+    name: str
+    source_file: Path | None
+    before_owner_ref: str
+    after_owner_ref: str
+    before_owner_uid: str
+    after_owner_uid: str
+    changed: bool
+    applied: bool
+    status: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "source_file": str(self.source_file) if self.source_file else None,
+            "before_owner_ref": self.before_owner_ref,
+            "after_owner_ref": self.after_owner_ref,
+            "before_owner_uid": self.before_owner_uid,
+            "after_owner_uid": self.after_owner_uid,
+            "changed": self.changed,
+            "applied": self.applied,
+            "status": self.status,
         }
 
 
@@ -98,18 +135,46 @@ def resolve_worktree_owner(
         and _is_under(resolved, record.path)
     ]
     if not candidates:
-        return WorktreeOwner(found=False, owner_ref="", path=resolved)
+        return WorktreeOwner(found=False, owner_ref="", owner_uid="", path=resolved)
 
     record = max(candidates, key=lambda item: len(item.path.parts) if item.path else 0)
     return WorktreeOwner(
         found=True,
         owner_ref=record.spec.owner_ref,
+        owner_uid=record.spec.owner_uid,
         path=resolved,
         record_path=record.path,
         identity=record.identity,
         name=record.name,
         lifecycle=record.spec.lifecycle,
     )
+
+
+def migrate_worktree_owner_uids(
+    records: list[RegistryAsset],
+    *,
+    dry_run: bool = False,
+) -> list[WorktreeOwnerMigration]:
+    results: list[WorktreeOwnerMigration] = []
+    for record in records:
+        if record.kind != "Worktree":
+            continue
+        result = _plan_owner_migration(record)
+        if result.changed and not dry_run:
+            _apply_owner_migration(record, result)
+            result = WorktreeOwnerMigration(
+                name=result.name,
+                source_file=result.source_file,
+                before_owner_ref=result.before_owner_ref,
+                after_owner_ref=result.after_owner_ref,
+                before_owner_uid=result.before_owner_uid,
+                after_owner_uid=result.after_owner_uid,
+                changed=True,
+                applied=True,
+                status="updated",
+            )
+        results.append(result)
+    return results
 
 
 def plan_create_worktree(  # noqa: PLR0913
@@ -133,18 +198,21 @@ def plan_create_worktree(  # noqa: PLR0913
 
     owner = _normalize_owner_ref(owner_ref, allow_unowned=allow_unowned)
     name = _source_repo_name(source_path, source_repo)
-    inferred_world = _infer_world(owner, source_path, records, workspace_root, world)
-    branch_name = _normalize_branch(branch or _default_branch(owner, slug))
+    inferred_world = _infer_world(
+        owner.ref, source_path, records, workspace_root, world
+    )
+    branch_name = _normalize_branch(branch or _default_branch(owner.ref, slug))
     worktree_path = (
         path.expanduser().resolve()
         if path is not None
-        else _default_worktree_path(workspace_root, name, owner, slug)
+        else _default_worktree_path(workspace_root, name, owner.ref, slug)
     )
     _ensure_worktree_target(worktree_path, workspace_root, must_exist=False)
 
     document = _worktree_document(
         worktree_path,
-        owner,
+        owner.ref,
+        owner.uid,
         inferred_world,
         source_repo=name,
     )
@@ -152,7 +220,8 @@ def plan_create_worktree(  # noqa: PLR0913
     _ensure_no_registry_conflict(records, registry_file, document, worktree_path)
     return WorktreePlan(
         action="create",
-        owner_ref=owner,
+        owner_ref=owner.ref,
+        owner_uid=owner.uid,
         world=inferred_world,
         source_repo_path=source_path,
         source_repo=name,
@@ -192,9 +261,9 @@ def plan_register_worktree(  # noqa: PLR0913
     _ensure_worktree_target(path, workspace_root, must_exist=True)
 
     owner = _normalize_owner_ref(owner_ref, allow_unowned=allow_unowned)
-    name = source_repo.strip() or _infer_source_repo(path, owner)
+    name = source_repo.strip() or _infer_source_repo(path, owner.ref)
     inferred_world = _infer_world(
-        owner, _source_repo_path(path), records, workspace_root, world
+        owner.ref, _source_repo_path(path), records, workspace_root, world
     )
     branch_name = _git_stdout(path, "rev-parse", "--abbrev-ref", "HEAD")
     if branch_name == "HEAD":
@@ -202,7 +271,8 @@ def plan_register_worktree(  # noqa: PLR0913
 
     document = _worktree_document(
         path,
-        owner,
+        owner.ref,
+        owner.uid,
         inferred_world,
         source_repo=name,
     )
@@ -210,7 +280,8 @@ def plan_register_worktree(  # noqa: PLR0913
     _ensure_no_registry_conflict(records, registry_file, document, path)
     return WorktreePlan(
         action="register",
-        owner_ref=owner,
+        owner_ref=owner.ref,
+        owner_uid=owner.uid,
         world=inferred_world,
         source_repo_path=_source_repo_path(path),
         source_repo=name,
@@ -265,6 +336,7 @@ def _mark_applied(plan: WorktreePlan) -> WorktreePlan:
     return WorktreePlan(
         action=plan.action,
         owner_ref=plan.owner_ref,
+        owner_uid=plan.owner_uid,
         world=plan.world,
         source_repo_path=plan.source_repo_path,
         source_repo=plan.source_repo,
@@ -277,9 +349,106 @@ def _mark_applied(plan: WorktreePlan) -> WorktreePlan:
     )
 
 
+def _plan_owner_migration(record: RegistryAsset) -> WorktreeOwnerMigration:
+    current_ref = record.spec.owner_ref.strip()
+    current_uid = record.spec.owner_uid.strip()
+    current = NormalizedOwner(current_ref, current_uid)
+    if not current_ref:
+        return _owner_migration_result(
+            record, current, NormalizedOwner("", ""), "missing-owner"
+        )
+    if current_ref.startswith("none:"):
+        return _owner_migration_result(record, current, current, "unowned")
+    owner = _resolve_docket_owner(current_uid or current_ref)
+    if not owner.uid:
+        return _owner_migration_result(record, current, current, "unresolved")
+    planned = NormalizedOwner(owner.ref or current_ref, owner.uid)
+    if _owner_record_current(record, planned.ref, planned.uid):
+        return _owner_migration_result(record, current, planned, "current")
+    return _owner_migration_result(record, current, planned, "planned")
+
+
+def _owner_migration_result(
+    record: RegistryAsset,
+    before: NormalizedOwner,
+    after: NormalizedOwner,
+    status: str,
+) -> WorktreeOwnerMigration:
+    return WorktreeOwnerMigration(
+        name=record.name,
+        source_file=record.source_file,
+        before_owner_ref=before.ref,
+        after_owner_ref=after.ref,
+        before_owner_uid=before.uid,
+        after_owner_uid=after.uid,
+        changed=status == "planned",
+        applied=False,
+        status=status,
+    )
+
+
+def _owner_record_current(
+    record: RegistryAsset, owner_ref: str, owner_uid: str
+) -> bool:
+    return (
+        record.spec.owner_ref == owner_ref
+        and record.spec.owner_uid == owner_uid
+        and record.labels.get("issue") == owner_ref
+        and record.labels.get("issue_uid") == owner_uid
+    )
+
+
+def _apply_owner_migration(
+    record: RegistryAsset,
+    migration: WorktreeOwnerMigration,
+) -> None:
+    if record.source_file is None:
+        raise RegistrarError(f"{record.name}: registry source file is unknown")
+    document = _read_registry_document(record.source_file)
+    metadata = _ensure_mapping(document, "metadata", record.source_file)
+    labels = metadata.get("labels")
+    if labels is None:
+        labels = {}
+        metadata["labels"] = labels
+    if not isinstance(labels, dict):
+        raise RegistrarError(f"{record.source_file}: metadata.labels must be a mapping")
+    spec = _ensure_mapping(document, "spec", record.source_file)
+    spec["owner_ref"] = migration.after_owner_ref
+    spec["owner_uid"] = migration.after_owner_uid
+    labels["issue"] = migration.after_owner_ref
+    labels["issue_uid"] = migration.after_owner_uid
+    record.source_file.write_text(
+        yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    commit_registry_change(
+        record.source_file,
+        f"chore(registrar): migrate worktree owner uid {record.name}",
+    )
+
+
+def _read_registry_document(path: Path) -> dict[str, Any]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise RegistrarError(f"registry file must contain a mapping: {path}")
+    return raw
+
+
+def _ensure_mapping(
+    document: dict[str, Any],
+    key: str,
+    source_file: Path,
+) -> dict[str, Any]:
+    value = document.get(key)
+    if not isinstance(value, dict):
+        raise RegistrarError(f"{source_file}: {key} mapping is required")
+    return value
+
+
 def _worktree_document(
     path: Path,
     owner_ref: str,
+    owner_uid: str,
     world: str,
     *,
     source_repo: str,
@@ -291,6 +460,8 @@ def _worktree_document(
     }
     if not owner_ref.startswith("none:"):
         labels["issue"] = owner_ref
+    if owner_uid:
+        labels["issue_uid"] = owner_uid
     return {
         "apiVersion": API_VERSION,
         "kind": "Worktree",
@@ -304,6 +475,7 @@ def _worktree_document(
         },
         "spec": {
             "owner_ref": owner_ref,
+            **({"owner_uid": owner_uid} if owner_uid else {}),
             "lifecycle": "active",
             "placement": "workspace/worktrees",
             "restore_policy": "linked-worktree",
@@ -323,7 +495,9 @@ def _worktree_document(
     }
 
 
-def _normalize_owner_ref(owner_ref: str, *, allow_unowned: bool = False) -> str:
+def _normalize_owner_ref(
+    owner_ref: str, *, allow_unowned: bool = False
+) -> NormalizedOwner:
     value = owner_ref.strip()
     if not value:
         raise RegistrarError("--owner-ref is required")
@@ -331,17 +505,39 @@ def _normalize_owner_ref(owner_ref: str, *, allow_unowned: bool = False) -> str:
         if not allow_unowned:
             raise RegistrarError(
                 "--owner-ref none:<reason> is a break-glass exception; "
-                "create or reuse a docket issue and pass --owner-ref <PM-ISSUE>. "
+                "create or reuse a docket issue and pass --owner-ref <ISSUE-REF>. "
                 "For an explicit temporary exception, rerun with --allow-unowned."
             )
-        return value
-    if not re.fullmatch(r"[A-Z][A-Z0-9]+-\d+", value):
+        return NormalizedOwner(ref=value)
+    if not re.fullmatch(r"[A-Z][A-Z0-9]+-\d+|dkt_[0-9a-f]{32}", value):
         raise RegistrarError(
-            "--owner-ref must be a PM issue like PROJ-542. "
+            "--owner-ref must be a docket issue ref like WORK-12 or dkt_<uid>. "
             "If no issue exists, run `docket new --triage --actor codex <title>` "
             "and retry with that issue id."
         )
-    return value
+    return _resolve_docket_owner(value)
+
+
+def _resolve_docket_owner(value: str) -> NormalizedOwner:
+    try:
+        result = subprocess.run(
+            ["docket", "resolve", value, "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return NormalizedOwner(ref=value)
+    if result.returncode != 0:
+        return NormalizedOwner(ref=value)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return NormalizedOwner(ref=value)
+    display = str(payload.get("display_ref") or "").strip()
+    uid = str(payload.get("uid") or "").strip()
+    return NormalizedOwner(ref=display or value, uid=uid)
 
 
 def _default_branch(owner_ref: str, slug: str) -> str:

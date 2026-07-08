@@ -19,10 +19,12 @@ registrar relocate --dry-run <asset-name-or-path>
 registrar relocate --dry-run --broad-sweep <asset-name-or-path>
 registrar relocate --apply <asset-name-or-path>
 registrar closeout --dry-run <asset-name-or-path>
-registrar worktree create <repo-path> --owner-ref <ISSUE>
-registrar worktree register <worktree-path> --owner-ref <ISSUE>
+registrar worktree create <repo-path> --owner-ref <ISSUE-REF>
+registrar worktree register <worktree-path> --owner-ref <ISSUE-REF>
+registrar worktree migrate-owners --dry-run
+registrar worktree migrate-owners
 registrar worktree audit
-registrar worktree reconcile <ISSUE> --alias <DISPLAY-ID> --format json
+registrar worktree reconcile <ISSUE-UID-or-ref> --alias <DISPLAY-ID> --format json
 registrar worktree remove <worktree-name-or-path> --apply
 ```
 
@@ -69,13 +71,18 @@ registrar worktree create <repo-path> --owner-ref TASK-542
 registrar worktree register <worktree-path> --owner-ref TASK-542
 ```
 
-这两个命令默认执行；需要预览时加 `--dry-run`。`--owner-ref` 必须是 issue id
-（例如 `TASK-542`）。如果没有 issue，先用 `docket new` 创建或复用一个 PM issue。
+这两个命令默认执行；需要预览时加 `--dry-run`。`--owner-ref` 必须是 docket issue ref
+（例如 `WORK-12`、历史 alias `ERI-908`，或 `dkt_...` uid）。命令会尽量调用
+`docket resolve <ref> --json`：成功时 registry 同时写 `spec.owner_ref`（当前 display ref）
+和 `spec.owner_uid`（机器主键）。`docket resolve` 是 owner 的唯一解析入口；它会先查当前
+PM root，再按 configured tiers 兜底，因此 registrar 不自己判断 ref 属于 work 还是
+personal。如果没有 issue，先用 `docket new` 创建或复用一个 PM issue。
 `none:<reason>` 只用于明确临时例外，必须额外传 `--allow-unowned`。`world` 会优先从
 source repo registry/path 或 issue prefix 推导；推不出来时再传 `--world personal|work`。
 
-默认 worktree 目录名是 `<source-repo>-<owner-ref>`，例如
-`registrar-TASK-542` 会落成 `$REGISTRAR_WORKSPACE_ROOT/worktrees/registrar-task-542`。
+默认 worktree 目录名是 `<source-repo>-<owner-ref>`，其中 `<owner-ref>` 是 resolve 后的当前
+display ref，例如 `registrar-WORK-12` 会落成
+`$REGISTRAR_WORKSPACE_ROOT/worktrees/registrar-work-12`。
 `source-repo` 优先取 GitHub remote 的仓库名，取不到才用本地目录名。`--slug` 仍可用于
 生成更具体的分支名；目录名只有在同 repo + issue 的默认目录已经存在时，才把 slug 作为
 冲突逃生后缀。研发脚本、SQL、日志摘录和验证材料不要塞在 worktree 里长期保存，应落到
@@ -84,6 +91,17 @@ source repo registry/path 或 issue prefix 推导；推不出来时再传 `--wor
 当 registry root 位于 git work tree 时，`create` / `register` / `closeout` 会自动把
 **单个**记录文件 commit 进 registry 仓（pathspec 限定，不会把无关脏改扫进提交）；
 registry 不在 git 仓内时此步为 no-op。
+
+已有的旧 Worktree 记录如果只有 `owner_ref`，先跑：
+
+```sh
+registrar worktree migrate-owners --dry-run
+registrar worktree migrate-owners
+```
+
+它会逐条调用 `docket resolve`，把历史 ref/alias 收敛成当前 display ref，并补齐
+`spec.owner_uid` 与 `metadata.labels.issue_uid`。无法 resolve 的记录不会改写，会在输出里
+标成 `unresolved`。
 
 工作树收口先看 issue owner，再看本地安全条件：
 
@@ -95,8 +113,8 @@ registrar worktree closeout <worktree-name-or-path> --apply
 registrar worktree remove   <worktree-name-or-path> --apply   # closeout 的别名
 ```
 
-`reconcile` 是 issue 关闭前的机器闸：给定 canonical owner_ref 和可选显示别名
-（例如同一个 issue 的 `WORK-903` / `ERI-903`），它会列出仍挂在该 owner 下的
+`reconcile` 是 issue 关闭前的机器闸：给定 owner uid/ref 和可选显示别名
+（例如同一个 issue 的 `dkt_...` / `WORK-12` / `ERI-908`），它会列出仍挂在该 owner 下的
 active worktree，并返回每个 worktree 的 `close_gate_state` 与下一步
 `close_gate_action`。`docket finish` / `docket status Done|Canceled` 会调用这个
 命令；如果还有未收口 worktree，先按 action 合并或删除工作树，再关闭 issue。
@@ -128,6 +146,7 @@ metadata:
     repo: control-plane
 spec:
   owner_ref: TASK-542
+  owner_uid: dkt_0123456789abcdef0123456789abcdef
   lifecycle: active
   placement: workspace/root
   restore_policy: source-of-truth
@@ -137,6 +156,8 @@ finalizers:
   - closeout-recorded
 ```
 
+`spec.owner_ref` 是人类显示归属；`spec.owner_uid` 是 docket identity v3 机器归属。
+旧记录可能只有 `owner_ref`，audit/reconcile 会兼容，但新记录应尽量带 `owner_uid`。
 `spec` 是期望状态；`status` 由 `inventory` 和 `doctor` 生成。已明确移除的资产用
 `kind: Tombstone`，不写 `metadata.path`，历史位置放在
 `metadata.labels.old_path`。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 import subprocess
 from collections.abc import Sequence
@@ -30,6 +31,7 @@ class OwnerInfo:
     state: str
     status: str = ""
     canonical_ref: str = ""
+    uid: str = ""
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -37,6 +39,7 @@ class OwnerInfo:
             "state": self.state,
             "status": self.status,
             "canonical_ref": self.canonical_ref,
+            "uid": self.uid,
         }
 
 
@@ -45,6 +48,7 @@ class WorktreeAuditItem:
     name: str
     identity: str
     owner_ref: str
+    owner_uid: str
     owner_canonical: str
     owner_state: str
     owner_status: str
@@ -66,6 +70,7 @@ class WorktreeAuditItem:
             "name": self.name,
             "identity": self.identity,
             "owner_ref": self.owner_ref,
+            "owner_uid": self.owner_uid,
             "owner_canonical": self.owner_canonical,
             "owner_state": self.owner_state,
             "owner_status": self.owner_status,
@@ -310,9 +315,15 @@ def _select_worktree_records(
         record
         for record in records
         if _is_auditable(record, include_retired)
-        and (not owner_ref or record.spec.owner_ref == owner_ref)
+        and _record_matches_owner(record, owner_ref)
     ]
     return sorted(selected, key=lambda item: item.name)
+
+
+def _record_matches_owner(record: RegistryAsset, owner_ref: str) -> bool:
+    if not owner_ref:
+        return True
+    return owner_ref in {record.spec.owner_ref, record.spec.owner_uid}
 
 
 def _is_auditable(record: RegistryAsset, include_retired: bool) -> bool:
@@ -334,7 +345,12 @@ def _audit_record(
         _branch_state(path, git.branch, default_branch) if git.is_repo else "not-repo"
     )
     world = record.labels.get("world", "")
-    owner = _owner_info(record.spec.owner_ref, owner_cache, world=world)
+    owner = _owner_info(
+        record.spec.owner_ref,
+        owner_cache,
+        world=world,
+        owner_uid=record.spec.owner_uid,
+    )
     recommendation, blocker = _recommend(
         record, path_state, owner, git.dirty, git.untracked_count, branch_state
     )
@@ -351,6 +367,7 @@ def _audit_record(
         name=record.name,
         identity=record.identity,
         owner_ref=record.spec.owner_ref,
+        owner_uid=record.spec.owner_uid,
         owner_canonical=owner.canonical_ref,
         owner_state=owner.state,
         owner_status=owner.status,
@@ -378,16 +395,22 @@ def _record_path(record: RegistryAsset, workspace_root: Path) -> Path:
 
 
 def _owner_info(
-    owner_ref: str, cache: dict[tuple[str, str], OwnerInfo], world: str = ""
+    owner_ref: str,
+    cache: dict[tuple[str, str], OwnerInfo],
+    world: str = "",
+    owner_uid: str = "",
 ) -> OwnerInfo:
     if not owner_ref:
         return OwnerInfo(ref="", state="missing")
     if owner_ref.startswith("none:"):
         return OwnerInfo(ref=owner_ref, state="none", status=owner_ref)
+    lookup = owner_uid or owner_ref
     docket_tier = _docket_tier_for(owner_ref, world)
-    cache_key = (docket_tier, owner_ref)
+    cache_key = (docket_tier, lookup)
     if cache_key not in cache:
-        cache[cache_key] = _read_docket_owner(owner_ref, docket_tier=docket_tier)
+        cache[cache_key] = _read_docket_owner(
+            lookup, docket_tier=docket_tier, fallback_ref=owner_ref
+        )
     return cache[cache_key]
 
 
@@ -402,13 +425,34 @@ def _docket_tier_for(owner_ref: str, world: str) -> str:
     return ""
 
 
-def _read_docket_owner(owner_ref: str, *, docket_tier: str = "") -> OwnerInfo:
+def _read_docket_owner(
+    owner_ref: str, *, docket_tier: str = "", fallback_ref: str = ""
+) -> OwnerInfo:
+    result = _run_docket(_docket_cmd(docket_tier, "resolve", owner_ref, "--json"))
+    if result is None:
+        return OwnerInfo(ref=owner_ref, state="unknown")
+    if result.returncode == 0:
+        owner = _owner_from_resolve_json(result.stdout, owner_ref, fallback_ref)
+        if owner is not None:
+            return owner
+
+    result = _run_docket(_docket_cmd(docket_tier, "show", fallback_ref or owner_ref))
+    if result is None or result.returncode != 0:
+        return OwnerInfo(ref=owner_ref, state="unknown")
+    return _owner_from_show_output(result.stdout, owner_ref, fallback_ref)
+
+
+def _docket_cmd(docket_tier: str, *args: str) -> list[str]:
     cmd = ["docket"]
     if docket_tier:
         cmd.extend(["--tier", docket_tier])
-    cmd.extend(["show", owner_ref])
+    cmd.extend(args)
+    return cmd
+
+
+def _run_docket(cmd: list[str]) -> subprocess.CompletedProcess[str] | None:
     try:
-        result = subprocess.run(
+        return subprocess.run(
             cmd,
             check=False,
             capture_output=True,
@@ -416,14 +460,34 @@ def _read_docket_owner(owner_ref: str, *, docket_tier: str = "") -> OwnerInfo:
             timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return OwnerInfo(ref=owner_ref, state="unknown")
-    if result.returncode != 0:
-        return OwnerInfo(ref=owner_ref, state="unknown")
+        return None
 
+
+def _owner_from_resolve_json(
+    stdout: str, owner_ref: str, fallback_ref: str
+) -> OwnerInfo | None:
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or not payload:
+        return None
+    return OwnerInfo(
+        ref=str(payload.get("display_ref") or fallback_ref or owner_ref),
+        state=str(payload.get("state_type") or "unknown"),
+        status=str(payload.get("status") or ""),
+        canonical_ref=str(payload.get("id") or ""),
+        uid=str(payload.get("uid") or ""),
+    )
+
+
+def _owner_from_show_output(
+    stdout: str, owner_ref: str, fallback_ref: str
+) -> OwnerInfo:
     status = ""
     state_type = ""
     canonical = ""
-    for raw_line in result.stdout.splitlines():
+    for raw_line in stdout.splitlines():
         line = raw_line.strip()
         if line.startswith("id:"):
             canonical = line.split(":", maxsplit=1)[1].strip()
@@ -432,7 +496,7 @@ def _read_docket_owner(owner_ref: str, *, docket_tier: str = "") -> OwnerInfo:
         elif line.startswith("state_type:"):
             state_type = line.split(":", maxsplit=1)[1].strip()
     return OwnerInfo(
-        ref=owner_ref,
+        ref=fallback_ref or owner_ref,
         state=state_type or "unknown",
         status=status,
         canonical_ref=canonical,
@@ -503,7 +567,11 @@ def _close_gate(  # noqa: PLR0913
 
 def _owner_ref_matches(item: WorktreeAuditItem, refs: Sequence[str]) -> bool:
     ref_set = set(refs)
-    if item.owner_ref in ref_set or item.owner_canonical in ref_set:
+    if (
+        item.owner_ref in ref_set
+        or item.owner_uid in ref_set
+        or item.owner_canonical in ref_set
+    ):
         return True
     return bool(_owner_tokens(item.owner_canonical) & ref_set)
 
@@ -694,6 +762,7 @@ def _tombstone_document(record: RegistryAsset) -> dict[str, object]:
         },
         "spec": {
             "owner_ref": record.spec.owner_ref,
+            **({"owner_uid": record.spec.owner_uid} if record.spec.owner_uid else {}),
             "lifecycle": "retired",
             "placement": "removed",
             "restore_policy": "remote-branch",

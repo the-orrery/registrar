@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -45,6 +46,60 @@ def test_worktree_create_dry_run_prints_plan_without_writing(tmp_path: Path) -> 
     assert payload["worktree_path"].endswith("workspace/worktrees/registrar-task-542")
     assert not (workspace / "worktrees" / "registrar-task-542").exists()
     assert not (registry / "assets").exists()
+
+
+def test_worktree_create_resolves_owner_uid_with_docket(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docket = bin_dir / "docket"
+    docket.write_text(
+        "#!/bin/sh\n"
+        "cat <<'JSON'\n"
+        '{"uid":"dkt_0123456789abcdef0123456789abcdef",'
+        '"id":"ERI-908","display_ref":"WORK-12",'
+        '"status":"In Progress","state_type":"started"}\n'
+        "JSON\n",
+        encoding="utf-8",
+    )
+    docket.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "create",
+            str(source),
+            "--owner-ref",
+            "ERI-908",
+            "--world",
+            "personal",
+            "--dry-run",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["owner_ref"] == "WORK-12"
+    assert payload["owner_uid"] == "dkt_0123456789abcdef0123456789abcdef"
+    assert payload["worktree_path"].endswith("workspace/worktrees/registrar-work-12")
+    assert (
+        payload["document"]["metadata"]["labels"]["issue_uid"] == payload["owner_uid"]
+    )
+    assert payload["document"]["spec"]["owner_uid"] == payload["owner_uid"]
 
 
 def test_worktree_create_creates_git_worktree_and_registry_record(
@@ -243,6 +298,65 @@ def test_worktree_register_writes_existing_worktree_record(tmp_path: Path) -> No
     assert "issue: TEAM-588" in record.read_text(encoding="utf-8")
 
 
+def test_worktree_migrate_owners_backfills_owner_uid(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    registry = tmp_path / "registry"
+    record = _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "registrar-task-542",
+        "TASK-542",
+    )
+    _fake_docket_resolve(
+        tmp_path,
+        monkeypatch,
+        display_ref="WORK-12",
+        uid="dkt_0123456789abcdef0123456789abcdef",
+    )
+    runner = CliRunner()
+
+    dry_run = runner.invoke(
+        app,
+        [
+            "worktree",
+            "migrate-owners",
+            "--dry-run",
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "migrate-owners",
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert dry_run.exit_code == 0
+    [dry_item] = json.loads(dry_run.stdout)
+    assert dry_item["changed"] is True
+    assert dry_item["applied"] is False
+    assert result.exit_code == 0
+    [item] = json.loads(result.stdout)
+    assert item["before_owner_ref"] == "TASK-542"
+    assert item["after_owner_ref"] == "WORK-12"
+    assert item["after_owner_uid"] == "dkt_0123456789abcdef0123456789abcdef"
+    assert item["applied"] is True
+    text = record.read_text(encoding="utf-8")
+    assert "owner_ref: WORK-12" in text
+    assert "owner_uid: dkt_0123456789abcdef0123456789abcdef" in text
+    assert "issue: WORK-12" in text
+    assert "issue_uid: dkt_0123456789abcdef0123456789abcdef" in text
+
+
 def test_worktree_register_rejects_unowned_without_breakglass(
     tmp_path: Path,
 ) -> None:
@@ -411,7 +525,7 @@ def test_doctor_points_unowned_worktrees_to_register_command(tmp_path: Path) -> 
         item for item in findings if item["name"] == "registrar-task-542"
     )
     assert "registrar worktree register" in worktree_finding["next_action"]
-    assert "<PM-ISSUE>" in worktree_finding["next_action"]
+    assert "<ISSUE-REF>" in worktree_finding["next_action"]
     assert "none:" not in worktree_finding["next_action"]
 
 
@@ -1099,6 +1213,55 @@ def test_worktree_create_auto_commits_record_when_registry_is_git_repo(
     assert "register worktree" in log.stdout
 
 
+def test_worktree_migrate_owners_auto_commits_registry_record(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    registry = _git_init(tmp_path / "registry")
+    _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "registrar-task-542",
+        "TASK-542",
+    )
+    _run("git", "-C", str(registry), "add", "-A")
+    _run("git", "-C", str(registry), "commit", "-q", "-m", "seed record")
+    _fake_docket_resolve(
+        tmp_path,
+        monkeypatch,
+        display_ref="WORK-12",
+        uid="dkt_0123456789abcdef0123456789abcdef",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "migrate-owners",
+            "--registry-root",
+            str(registry),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    status = subprocess.run(
+        ["git", "-C", str(registry), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert status.stdout.strip() == ""
+    log = subprocess.run(
+        ["git", "-C", str(registry), "log", "-1", "--format=%s"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "migrate worktree owner uid" in log.stdout
+
+
 def test_worktree_closeout_auto_commits_record_deletion(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     source = _git_repo(workspace / "projects" / "tools" / "registrar")
@@ -1190,6 +1353,28 @@ finalizers:
         encoding="utf-8",
     )
     return record
+
+
+def _fake_docket_resolve(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    display_ref: str,
+    uid: str,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    docket = bin_dir / "docket"
+    docket.write_text(
+        "#!/bin/sh\n"
+        "cat <<'JSON'\n"
+        f'{{"uid":"{uid}","id":"ERI-908","display_ref":"{display_ref}",'
+        '"status":"In Progress","state_type":"started"}\n'
+        "JSON\n",
+        encoding="utf-8",
+    )
+    docket.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
 
 
 def _git_repo(path: Path) -> Path:

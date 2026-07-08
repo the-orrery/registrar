@@ -69,8 +69,7 @@ def by_name_or_path(
             f"{record.kind}:{record.identity}" for record in alias_matches
         )
         raise RegistrarError(
-            f"{value}: ambiguous metadata.aliases; use metadata.identity "
-            f"({candidates})"
+            f"{value}: ambiguous metadata.aliases; use metadata.identity ({candidates})"
         )
     matches = [record for record in records if record.name == value]
     if len(matches) == 1:
@@ -78,8 +77,7 @@ def by_name_or_path(
     if len(matches) > 1:
         candidates = ", ".join(f"{record.kind}:{record.identity}" for record in matches)
         raise RegistrarError(
-            f"{value}: ambiguous metadata.name; use metadata.identity "
-            f"({candidates})"
+            f"{value}: ambiguous metadata.name; use metadata.identity ({candidates})"
         )
     return None
 
@@ -194,7 +192,8 @@ def _asset_from_document(data: dict[str, Any], source_file: Path) -> RegistryAss
     )
     return RegistryAsset(
         kind=kind,
-        identity=raw_identity or derive_identity(kind, name, placement, capability_type),
+        identity=raw_identity
+        or derive_identity(kind, name, placement, capability_type),
         name=name,
         path=path,
         aliases=tuple(aliases),
@@ -315,8 +314,7 @@ def _validate_aliases(records: list[RegistryAsset]) -> None:
         for alias in record.aliases:
             if alias in record_seen:
                 raise RegistrarError(
-                    f"{record.source_file}: duplicate metadata.aliases value "
-                    f"{alias!r}"
+                    f"{record.source_file}: duplicate metadata.aliases value {alias!r}"
                 )
             record_seen.add(alias)
             if alias in identities:

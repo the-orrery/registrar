@@ -156,7 +156,9 @@ def closeout_worktree(
             source_file=record.source_file,
         )
     if record.kind != WORKTREE_KIND:
-        raise RegistrarError(f"{record.name}: expected Worktree record, got {record.kind}")
+        raise RegistrarError(
+            f"{record.name}: expected Worktree record, got {record.kind}"
+        )
     item = _audit_record(record, workspace_root, {})
     blockers = _closeout_blockers(
         item,
@@ -255,10 +257,14 @@ def _audit_record(
     path_state = "exists" if path.exists() else "missing"
     git = git_status(path)
     default_branch = _default_branch(path) if git.is_repo else ""
-    branch_state = _branch_state(path, git.branch, default_branch) if git.is_repo else "not-repo"
+    branch_state = (
+        _branch_state(path, git.branch, default_branch) if git.is_repo else "not-repo"
+    )
     world = record.labels.get("world", "")
     owner = _owner_info(record.spec.owner_ref, owner_cache, world=world)
-    recommendation, blocker = _recommend(record, path_state, owner, git.dirty, git.untracked_count, branch_state)
+    recommendation, blocker = _recommend(
+        record, path_state, owner, git.dirty, git.untracked_count, branch_state
+    )
     return WorktreeAuditItem(
         name=record.name,
         identity=record.identity,
@@ -282,7 +288,9 @@ def _audit_record(
 def _record_path(record: RegistryAsset, workspace_root: Path) -> Path:
     if record.path is not None:
         return record.path
-    return Path(record.labels.get("old_path", str(workspace_root / record.name))).expanduser()
+    return Path(
+        record.labels.get("old_path", str(workspace_root / record.name))
+    ).expanduser()
 
 
 def _owner_info(
@@ -427,7 +435,9 @@ def _planned_actions(
 
 
 def _default_branch(path: Path) -> str:
-    origin_head = _git_stdout(path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    origin_head = _git_stdout(
+        path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"
+    )
     if origin_head.startswith("origin/"):
         branch = origin_head.split("/", maxsplit=1)[1]
         if _local_branch_exists(path, branch):
@@ -457,7 +467,15 @@ def _branch_state(path: Path, branch: str, default_branch: str) -> str:
 
 def _local_branch_exists(path: Path, branch: str) -> bool:
     result = subprocess.run(
-        ["git", "-C", str(path), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}",
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -518,14 +536,18 @@ def _closeout_record(record: RegistryAsset, record_mode: str) -> None:
         record.source_file.unlink()
         return
     record.source_file.write_text(
-        yaml.safe_dump(_tombstone_document(record), allow_unicode=True, sort_keys=False),
+        yaml.safe_dump(
+            _tombstone_document(record), allow_unicode=True, sort_keys=False
+        ),
         encoding="utf-8",
     )
 
 
 def _tombstone_document(record: RegistryAsset) -> dict[str, object]:
     labels = dict(record.labels)
-    old_path = str(record.path) if record.path is not None else labels.get("old_path", "")
+    old_path = (
+        str(record.path) if record.path is not None else labels.get("old_path", "")
+    )
     labels.update(
         {
             "old_identity": record.identity,

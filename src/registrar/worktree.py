@@ -124,13 +124,14 @@ def plan_create_worktree(  # noqa: PLR0913
     path: Path | None = None,
     world: str = "",
     source_repo: str = "",
+    allow_unowned: bool = False,
 ) -> WorktreePlan:
     source_path = repo_path.expanduser().resolve()
     if not source_path.exists():
         raise RegistrarError(f"source repo path does not exist: {source_path}")
     _ensure_git_repo(source_path, "source repo")
 
-    owner = _normalize_owner_ref(owner_ref)
+    owner = _normalize_owner_ref(owner_ref, allow_unowned=allow_unowned)
     name = source_repo.strip() or source_path.name
     inferred_world = _infer_world(owner, source_path, records, workspace_root, world)
     branch_name = _normalize_branch(branch or _default_branch(owner, slug))
@@ -182,6 +183,7 @@ def plan_register_worktree(  # noqa: PLR0913
     *,
     world: str = "",
     source_repo: str = "",
+    allow_unowned: bool = False,
 ) -> WorktreePlan:
     path = worktree_path.expanduser().resolve()
     if not path.exists():
@@ -189,7 +191,7 @@ def plan_register_worktree(  # noqa: PLR0913
     _ensure_git_repo(path, "worktree")
     _ensure_worktree_target(path, workspace_root, must_exist=True)
 
-    owner = _normalize_owner_ref(owner_ref)
+    owner = _normalize_owner_ref(owner_ref, allow_unowned=allow_unowned)
     name = source_repo.strip() or _infer_source_repo(path, owner)
     inferred_world = _infer_world(
         owner, _source_repo_path(path), records, workspace_root, world
@@ -321,15 +323,23 @@ def _worktree_document(
     }
 
 
-def _normalize_owner_ref(owner_ref: str) -> str:
+def _normalize_owner_ref(owner_ref: str, *, allow_unowned: bool = False) -> str:
     value = owner_ref.strip()
     if not value:
         raise RegistrarError("--owner-ref is required")
     if value.startswith("none:") and len(value) > len("none:"):
+        if not allow_unowned:
+            raise RegistrarError(
+                "--owner-ref none:<reason> is a break-glass exception; "
+                "create or reuse a docket issue and pass --owner-ref <PM-ISSUE>. "
+                "For an explicit temporary exception, rerun with --allow-unowned."
+            )
         return value
     if not re.fullmatch(r"[A-Z][A-Z0-9]+-\d+", value):
         raise RegistrarError(
-            "--owner-ref must be a PM issue like PROJ-542 or none:<reason>"
+            "--owner-ref must be a PM issue like PROJ-542. "
+            "If no issue exists, run `docket new --triage --actor codex <title>` "
+            "and retry with that issue id."
         )
     return value
 

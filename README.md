@@ -69,8 +69,9 @@ registrar worktree register <worktree-path> --owner-ref TASK-542
 ```
 
 这两个命令默认执行；需要预览时加 `--dry-run`。`--owner-ref` 必须是 issue id
-（例如 `TASK-542`），或者显式无主原因 `none:<reason>`。`world` 会优先从 source repo
-registry/path 或 issue prefix 推导；推不出来时再传 `--world personal|work`。
+（例如 `TASK-542`）。如果没有 issue，先用 `docket new` 创建或复用一个 PM issue。
+`none:<reason>` 只用于明确临时例外，必须额外传 `--allow-unowned`。`world` 会优先从
+source repo registry/path 或 issue prefix 推导；推不出来时再传 `--world personal|work`。
 
 当 registry root 位于 git work tree 时，`create` / `register` / `closeout` 会自动把
 **单个**记录文件 commit 进 registry 仓（pathspec 限定，不会把无关脏改扫进提交）；

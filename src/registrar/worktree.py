@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -352,42 +352,35 @@ def _mark_applied(plan: WorktreePlan) -> WorktreePlan:
 def _plan_owner_migration(record: RegistryAsset) -> WorktreeOwnerMigration:
     current_ref = record.spec.owner_ref.strip()
     current_uid = record.spec.owner_uid.strip()
+    current = NormalizedOwner(current_ref, current_uid)
     if not current_ref:
-        return _owner_migration_result(record, "", "", current_uid, "", "missing-owner")
-    if current_ref.startswith("none:"):
         return _owner_migration_result(
-            record, current_ref, current_ref, current_uid, current_uid, "unowned"
+            record, current, NormalizedOwner("", ""), "missing-owner"
         )
+    if current_ref.startswith("none:"):
+        return _owner_migration_result(record, current, current, "unowned")
     owner = _resolve_docket_owner(current_uid or current_ref)
     if not owner.uid:
-        return _owner_migration_result(
-            record, current_ref, current_ref, current_uid, current_uid, "unresolved"
-        )
-    next_ref = owner.ref or current_ref
-    if _owner_record_current(record, next_ref, owner.uid):
-        return _owner_migration_result(
-            record, current_ref, next_ref, current_uid, owner.uid, "current"
-        )
-    return _owner_migration_result(
-        record, current_ref, next_ref, current_uid, owner.uid, "planned"
-    )
+        return _owner_migration_result(record, current, current, "unresolved")
+    planned = NormalizedOwner(owner.ref or current_ref, owner.uid)
+    if _owner_record_current(record, planned.ref, planned.uid):
+        return _owner_migration_result(record, current, planned, "current")
+    return _owner_migration_result(record, current, planned, "planned")
 
 
 def _owner_migration_result(
     record: RegistryAsset,
-    before_ref: str,
-    after_ref: str,
-    before_uid: str,
-    after_uid: str,
+    before: NormalizedOwner,
+    after: NormalizedOwner,
     status: str,
 ) -> WorktreeOwnerMigration:
     return WorktreeOwnerMigration(
         name=record.name,
         source_file=record.source_file,
-        before_owner_ref=before_ref,
-        after_owner_ref=after_ref,
-        before_owner_uid=before_uid,
-        after_owner_uid=after_uid,
+        before_owner_ref=before.ref,
+        after_owner_ref=after.ref,
+        before_owner_uid=before.uid,
+        after_owner_uid=after.uid,
         changed=status == "planned",
         applied=False,
         status=status,

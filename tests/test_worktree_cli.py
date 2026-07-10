@@ -7,6 +7,8 @@ from typer.testing import CliRunner
 
 from registrar.cli import app
 from registrar.errors import RegistrarError
+from registrar.registry import load_registry
+from registrar.worktree_lifecycle import _reconciliation_candidates
 
 
 def test_worktree_create_dry_run_prints_plan_without_writing(tmp_path: Path) -> None:
@@ -858,6 +860,61 @@ def test_worktree_reconcile_allows_owner_without_worktrees(tmp_path: Path) -> No
     assert payload["active_count"] == 0
 
 
+def test_reconcile_candidates_only_audit_uid_matched_records(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    registry = tmp_path / "registry"
+    _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "target",
+        "OPS-8",
+        owner_uid="dkt_target",
+        name="target",
+    )
+    _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "unrelated",
+        "OPS-7",
+        owner_uid="dkt_unrelated",
+        name="unrelated",
+    )
+
+    candidates = _reconciliation_candidates(
+        load_registry(registry),
+        workspace,
+        ("dkt_target", "OPS-8"),
+        include_retired=False,
+    )
+
+    assert [record.name for record in candidates] == ["target"]
+
+
+def test_reconcile_candidates_keep_legacy_records_on_safe_path(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    registry = tmp_path / "registry"
+    _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "target",
+        "OPS-8",
+        owner_uid="dkt_target",
+        name="target",
+    )
+    _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "legacy",
+        "HISTORICAL-8",
+        name="legacy",
+    )
+
+    candidates = _reconciliation_candidates(
+        load_registry(registry),
+        workspace,
+        ("dkt_target", "OPS-8"),
+        include_retired=False,
+    )
+
+    assert [record.name for record in candidates] == ["legacy", "target"]
+
+
 def test_worktree_closeout_apply_removes_worktree_and_active_record(
     tmp_path: Path,
 ) -> None:
@@ -1318,16 +1375,24 @@ def test_worktree_closeout_auto_commits_record_deletion(tmp_path: Path) -> None:
     assert "closeout worktree" in log.stdout
 
 
-def _write_worktree_record(registry: Path, worktree: Path, owner_ref: str) -> Path:
+def _write_worktree_record(
+    registry: Path,
+    worktree: Path,
+    owner_ref: str,
+    *,
+    owner_uid: str = "",
+    name: str = "registrar-task-542",
+) -> Path:
     registry.mkdir(parents=True, exist_ok=True)
-    record = registry / "worktree-registrar-task-542.yaml"
+    record = registry / f"worktree-{name}.yaml"
+    owner_uid_line = f"  owner_uid: {owner_uid}\n" if owner_uid else ""
     record.write_text(
         f"""
 apiVersion: registrar.local/v1alpha1
 kind: Worktree
 metadata:
-  identity: worktrees/registrar-task-542
-  name: registrar-task-542
+  identity: worktrees/{name}
+  name: {name}
   path: {worktree}
   labels:
     world: personal
@@ -1336,7 +1401,7 @@ metadata:
     issue: {owner_ref}
 spec:
   owner_ref: {owner_ref}
-  lifecycle: active
+{owner_uid_line}  lifecycle: active
   placement: workspace/worktrees
   restore_policy: linked-worktree
   allowed_actions:

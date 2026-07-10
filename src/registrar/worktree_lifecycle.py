@@ -174,12 +174,8 @@ def reconcile_owner_worktrees(
     owner_cache: dict[tuple[str, str], OwnerInfo] = {}
     items = tuple(
         item
-        for record in _select_worktree_records(
-            records,
-            workspace_root,
-            asset=None,
-            owner_ref="",
-            include_retired=include_retired,
+        for record in _reconciliation_candidates(
+            records, workspace_root, refs, include_retired=include_retired
         )
         if _is_auditable(record, include_retired)
         for item in (_audit_record(record, workspace_root, owner_cache),)
@@ -201,6 +197,37 @@ def reconcile_owner_worktrees(
         stale_count=sum(1 for item in active_items if item.close_gate_state == "stale"),
         items=active_items,
     )
+
+
+def _reconciliation_candidates(
+    records: list[RegistryAsset],
+    workspace_root: Path,
+    refs: Sequence[str],
+    *,
+    include_retired: bool,
+) -> list[RegistryAsset]:
+    """Return the narrow safe set for an owner reconciliation.
+
+    New worktree records carry the immutable docket owner_uid, so matching them
+    needs no subprocess-backed owner resolution. Pre-identity records have no
+    owner_uid; retain the exhaustive compatibility path for those records so a
+    legacy alias can never evade the close gate.
+    """
+    selected = _select_worktree_records(
+        records,
+        workspace_root,
+        asset=None,
+        owner_ref="",
+        include_retired=include_retired,
+    )
+    ref_set = set(refs)
+    return [
+        record
+        for record in selected
+        if not record.spec.owner_uid
+        or record.spec.owner_ref in ref_set
+        or record.spec.owner_uid in ref_set
+    ]
 
 
 def closeout_worktree(  # noqa: PLR0913

@@ -19,7 +19,7 @@ classifiers = [
 dependencies = [
     "pyyaml>=6.0",
     "typer>=0.12",
-    "orrery-heartbeat @ git+https://github.com/the-orrery/orrery-heartbeat.git",
+    "orrery-heartbeat @ git+https://github.com/the-orrery/orrery-heartbeat.git@3eb8b4c4d5855e8da9f59f4456adfc5b38d262e8",
 ]
 
 [project.scripts]
@@ -34,7 +34,7 @@ dev = [
     "poethepoet",
     "pyrefly>=1.1.1",
 ]
-freeze = ["pyinstaller>=6.0"]
+freeze = ["pyinstaller>=6,<7"]
 
 [tool.poe.tasks]
 lint = "uvx ruff@0.15.16 check ."
@@ -42,7 +42,7 @@ fmt = "uvx ruff@0.15.16 format ."
 typecheck = "pyrefly check"
 test = "pytest"
 check = { sequence = ["lint", "typecheck", "test"], help = "lint + typecheck + test" }
-freeze = { cmd = "pyinstaller --onefile --clean --name registrar src/registrar/cli.py", help = "build a single-file binary into dist/" }
+freeze = { cmd = "./scripts/build-release.sh", help = "build the release binary" }
 
 [tool.ruff]
 line-length = 88

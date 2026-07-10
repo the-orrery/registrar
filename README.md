@@ -1,5 +1,13 @@
 # registrar
 
+## Install
+
+Install the verified `registrar-<os>-<arch>` asset from
+[GitHub Releases](https://github.com/the-orrery/registrar/releases). It does not
+need Python, `uv`, or a source checkout; git and the configured `docket` binary
+remain runtime integrations. Targets are macOS arm64 and Linux x86_64 (Ubuntu
+22.04 baseline). Use `./scripts/build-release.sh` for a local build.
+
 `registrar` 是本机 workspace 资产登记和生命周期控制面。它回答三件事：
 
 1. workspace 里有哪些资产；
@@ -168,5 +176,5 @@ finalizers:
 uv sync
 uv run registrar --help
 uv run poe check
-uv tool install --force --reinstall --refresh .
+./scripts/build-release.sh
 ```

@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "registrar"
-version = "0.3.1"
+version = "0.3.2"
 description = "Local workspace asset registry and lifecycle dry-run control plane"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,7 +19,6 @@ classifiers = [
 dependencies = [
     "pyyaml>=6.0",
     "typer>=0.12",
-    "orrery-heartbeat @ git+https://github.com/the-orrery/orrery-heartbeat.git@2eb9141389416e529aaa8ac7c7a744cae2efd3e8",
 ]
 
 [project.scripts]

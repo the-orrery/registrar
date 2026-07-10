@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from orrery_heartbeat import check_update
 
 from . import __version__
 from .apply import apply_relocate
@@ -959,7 +958,6 @@ def _consume_tier(argv: list[str]) -> list[str]:
 
 
 def run() -> None:
-    check_update("registrar", "the-orrery/registrar")
     argv = _consume_tier(sys.argv[1:])
     sys.argv = [sys.argv[0], *argv]
     try:

@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "registrar"
-version = "0.3.2"
+version = "0.3.3"
 description = "Local workspace asset registry and lifecycle dry-run control plane"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -96,6 +96,12 @@ display ref，例如 `registrar-WORK-12` 会落成
 冲突逃生后缀。研发脚本、SQL、日志摘录和验证材料不要塞在 worktree 里长期保存，应落到
 对应 issue 的 `docket artifact` repo。
 
+`--tier` 是 registry 的信任边界，不只是路径简写。worktree create/register 会交叉校验
+当前 tier、`docket resolve` 返回的 owner tier、source repo 的 canonical root，以及
+`--world`。这些信号冲突时命令必须失败；`--world` 只用于没有强信号时消歧，不能把 work
+source/owner 强制登记成 personal，反向亦然。跨 tier 开发应在目标 tier 创建独立 Docket
+issue，不应把另一 tier 的 owner ref/uid 写入 registry。
+
 当 registry root 位于 git work tree 时，`create` / `register` / `closeout` 会自动把
 **单个**记录文件 commit 进 registry 仓（pathspec 限定，不会把无关脏改扫进提交）；
 registry 不在 git 仓内时此步为 no-op。

@@ -36,6 +36,7 @@ WORK_PREFIXES, PERSONAL_PREFIXES = _load_prefix_sets()
 class NormalizedOwner:
     ref: str
     uid: str = ""
+    tier: str = ""
 
 
 @dataclass(frozen=True)
@@ -198,9 +199,8 @@ def plan_create_worktree(  # noqa: PLR0913
 
     owner = _normalize_owner_ref(owner_ref, allow_unowned=allow_unowned)
     name = _source_repo_name(source_path, source_repo)
-    inferred_world = _infer_world(
-        owner.ref, source_path, records, workspace_root, world
-    )
+    inferred_world = _infer_world(owner, source_path, records, workspace_root, world)
+    _validate_registry_world(inferred_world, records, registry_root, workspace_root)
     branch_name = _normalize_branch(branch or _default_branch(owner.ref, slug))
     worktree_path = (
         path.expanduser().resolve()
@@ -263,8 +263,9 @@ def plan_register_worktree(  # noqa: PLR0913
     owner = _normalize_owner_ref(owner_ref, allow_unowned=allow_unowned)
     name = source_repo.strip() or _infer_source_repo(path, owner.ref)
     inferred_world = _infer_world(
-        owner.ref, _source_repo_path(path), records, workspace_root, world
+        owner, _source_repo_path(path), records, workspace_root, world
     )
+    _validate_registry_world(inferred_world, records, registry_root, workspace_root)
     branch_name = _git_stdout(path, "rev-parse", "--abbrev-ref", "HEAD")
     if branch_name == "HEAD":
         branch_name = ""
@@ -519,9 +520,13 @@ def _normalize_owner_ref(
 
 
 def _resolve_docket_owner(value: str) -> NormalizedOwner:
+    command = ["docket"]
+    if active_tier := os.environ.get("REGISTRAR_ACTIVE_TIER", "").strip():
+        command.extend(["--tier", active_tier])
+    command.extend(["resolve", value, "--json"])
     try:
         result = subprocess.run(
-            ["docket", "resolve", value, "--json"],
+            command,
             check=False,
             capture_output=True,
             text=True,
@@ -537,7 +542,8 @@ def _resolve_docket_owner(value: str) -> NormalizedOwner:
         return NormalizedOwner(ref=value)
     display = str(payload.get("display_ref") or "").strip()
     uid = str(payload.get("uid") or "").strip()
-    return NormalizedOwner(ref=display or value, uid=uid)
+    tier = str(payload.get("tier") or "").strip()
+    return NormalizedOwner(ref=display or value, uid=uid, tier=tier)
 
 
 def _default_branch(owner_ref: str, slug: str) -> str:
@@ -581,36 +587,102 @@ def _slugify(value: str) -> str:
 
 
 def _infer_world(
-    owner_ref: str,
+    owner: NormalizedOwner,
     source_path: Path | None,
     records: list[RegistryAsset],
     workspace_root: Path,
     explicit: str,
 ) -> str:
+    if explicit and explicit not in {"personal", "work"}:
+        raise RegistrarError("--world must be personal or work")
+
+    signals: dict[str, str] = {}
     if explicit:
-        if explicit not in {"personal", "work"}:
-            raise RegistrarError("--world must be personal or work")
-        return explicit
+        signals["--world"] = explicit
+    if owner.tier in {"personal", "work"}:
+        signals["docket owner"] = owner.tier
     if source_path is not None:
         for record in records:
             if record.path == source_path and record.labels.get("world"):
-                return record.labels["world"]
-        try:
-            parts = source_path.resolve().relative_to(workspace_root.resolve()).parts
-        except ValueError:
-            parts = ()
-        if (
-            len(parts) >= 2  # noqa: PLR2004
-            and parts[0] in {"sources", "knowledge", "data"}
-            and parts[1] in {"personal", "work"}
-        ):
-            return parts[1]
-    prefix = owner_ref.split("-", maxsplit=1)[0]
+                signals["source registry"] = record.labels["world"]
+        if path_world := _world_from_path(source_path, workspace_root):
+            signals["source path"] = path_world
+    prefix = owner.ref.split("-", maxsplit=1)[0]
     if prefix in WORK_PREFIXES:
-        return "work"
-    if prefix in PERSONAL_PREFIXES:
-        return "personal"
+        signals["owner prefix"] = "work"
+    elif prefix in PERSONAL_PREFIXES:
+        signals["owner prefix"] = "personal"
+
+    worlds = set(signals.values())
+    if len(worlds) > 1:
+        detail = ", ".join(f"{key}={value}" for key, value in signals.items())
+        raise RegistrarError(
+            f"world signals conflict ({detail}). Use the matching --tier and "
+            "do not override a source or docket trust tier with --world"
+        )
+    if worlds:
+        return next(iter(worlds))
     raise RegistrarError("cannot infer world; pass --world personal or --world work")
+
+
+def _validate_registry_world(
+    world: str,
+    records: list[RegistryAsset],
+    registry_root: Path,
+    workspace_root: Path,
+) -> None:
+    declared_worlds: set[str] = {
+        value
+        for record in records
+        if (value := record.labels.get("world")) in {"personal", "work"}
+    }
+    if active_tier := os.environ.get("REGISTRAR_ACTIVE_TIER", "").strip():
+        if active_tier in {"personal", "work"}:
+            declared_worlds.add(active_tier)
+    if path_world := _world_from_path(registry_root, workspace_root):
+        declared_worlds.add(path_world)
+    if len(declared_worlds) > 1:
+        values = ", ".join(sorted(declared_worlds))
+        raise RegistrarError(
+            f"registry mixes world labels ({values}): {registry_root}. "
+            "Reconcile the registry before creating or registering worktrees"
+        )
+    if declared_worlds and world not in declared_worlds:
+        registry_world = next(iter(declared_worlds))
+        raise RegistrarError(
+            f"world={world} conflicts with registry world={registry_world}: "
+            f"{registry_root}. Rerun with --tier {world}, or pass matching "
+            "--workspace-root and --registry-root"
+        )
+
+
+def _world_from_path(path: Path, workspace_root: Path) -> str:
+    resolved = path.expanduser().resolve()
+    roots = {
+        "personal": Path(
+            os.environ.get("REGISTRAR_PERSONAL_ROOT", Path.home() / "personal")
+        )
+        .expanduser()
+        .resolve(),
+        "work": Path(os.environ.get("REGISTRAR_WORK_ROOT", Path.home() / "work"))
+        .expanduser()
+        .resolve(),
+    }
+    for world, root in roots.items():
+        if _is_under(resolved, root):
+            return world
+
+    try:
+        parts = resolved.relative_to(workspace_root.expanduser().resolve()).parts
+    except ValueError:
+        return ""
+    if (
+        len(parts) >= 2  # noqa: PLR2004
+        and parts[0] in {"sources", "knowledge", "data"}
+        and parts[1] in {"personal", "work"}
+    ):
+        return parts[1]
+    return ""
 
 
 def _source_repo_path(worktree_path: Path) -> Path | None:

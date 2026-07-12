@@ -254,6 +254,93 @@ def test_worktree_create_allows_unowned_with_breakglass(
     assert payload["branch"] == "none-temporary-scratch"
 
 
+def test_worktree_create_rejects_world_conflicting_with_registry(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "tools" / "registrar")
+    registry = tmp_path / "registry"
+    _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "existing-personal",
+        "TASK-1",
+        name="existing-personal",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "create",
+            str(source),
+            "--owner-ref",
+            "TEAM-588",
+            "--world",
+            "work",
+            "--dry-run",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RegistrarError)
+    assert "world=work conflicts with registry world=personal" in (
+        result.exception.message
+    )
+    assert "--tier work" in result.exception.message
+    assert not (workspace / "worktrees" / "registrar-team-588").exists()
+
+
+def test_worktree_create_rejects_work_source_and_owner_in_personal_tier(
+    tmp_path: Path, monkeypatch
+) -> None:
+    home = Path.home()
+    workspace = home / "workspace"
+    source = _git_repo(home / "work" / "service")
+    registry = workspace / "data" / "personal" / "registrar"
+    registry.mkdir(parents=True)
+    _fake_docket_resolve(
+        tmp_path,
+        monkeypatch,
+        display_ref="TASK-34",
+        uid="dkt_0123456789abcdef0123456789abcdef",
+        tier="work",
+    )
+    monkeypatch.setenv("REGISTRAR_ACTIVE_TIER", "personal")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "create",
+            str(source),
+            "--owner-ref",
+            "TASK-34",
+            "--world",
+            "personal",
+            "--dry-run",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RegistrarError)
+    assert "world signals conflict" in result.exception.message
+    assert "docket owner=work" in result.exception.message
+    assert "source path=work" in result.exception.message
+    assert "--world=personal" in result.exception.message
+    assert "matching --tier" in result.exception.message
+    assert not (workspace / "worktrees" / "service-task-34").exists()
+
+
 def test_worktree_register_writes_existing_worktree_record(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     source = _git_repo(workspace / "projects" / "services" / "collector")
@@ -298,6 +385,112 @@ def test_worktree_register_writes_existing_worktree_record(tmp_path: Path) -> No
     assert payload["source_repo"] == "collector"
     assert record.exists()
     assert "issue: TEAM-588" in record.read_text(encoding="utf-8")
+
+
+def test_worktree_register_rejects_world_conflicting_with_registry(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = _git_repo(workspace / "projects" / "services" / "collector")
+    worktree = workspace / "worktrees" / "collector-team-588"
+    _run(
+        "git",
+        "-C",
+        str(source),
+        "worktree",
+        "add",
+        "-b",
+        "team-588",
+        str(worktree),
+        "HEAD",
+    )
+    registry = tmp_path / "registry"
+    _write_worktree_record(
+        registry,
+        workspace / "worktrees" / "existing-personal",
+        "TASK-1",
+        name="existing-personal",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "register",
+            str(worktree),
+            "--owner-ref",
+            "TEAM-588",
+            "--world",
+            "work",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RegistrarError)
+    assert "world=work conflicts with registry world=personal" in (
+        result.exception.message
+    )
+    assert "--tier work" in result.exception.message
+    assert not (registry / "assets" / "worktree-collector-team-588.yaml").exists()
+
+
+def test_worktree_register_rejects_work_common_dir_in_personal_registry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    home = Path.home()
+    workspace = home / "workspace"
+    source = _git_repo(home / "work" / "service")
+    worktree = workspace / "worktrees" / "service-task-34"
+    _run(
+        "git",
+        "-C",
+        str(source),
+        "worktree",
+        "add",
+        "-b",
+        "task-34",
+        str(worktree),
+        "HEAD",
+    )
+    registry = workspace / "data" / "personal" / "registrar"
+    registry.mkdir(parents=True)
+    _fake_docket_resolve(
+        tmp_path,
+        monkeypatch,
+        display_ref="TASK-34",
+        uid="dkt_0123456789abcdef0123456789abcdef",
+        tier="work",
+    )
+    monkeypatch.setenv("REGISTRAR_ACTIVE_TIER", "personal")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "worktree",
+            "register",
+            str(worktree),
+            "--owner-ref",
+            "TASK-34",
+            "--workspace-root",
+            str(workspace),
+            "--registry-root",
+            str(registry),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RegistrarError)
+    assert "world=work conflicts with registry world=personal" in (
+        result.exception.message
+    )
+    assert "--tier work" in result.exception.message
+    assert not (registry / "assets" / "worktree-service-task-34.yaml").exists()
 
 
 def test_worktree_migrate_owners_backfills_owner_uid(
@@ -1426,6 +1619,7 @@ def _fake_docket_resolve(
     *,
     display_ref: str,
     uid: str,
+    tier: str = "",
 ) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -1433,7 +1627,8 @@ def _fake_docket_resolve(
     docket.write_text(
         "#!/bin/sh\n"
         "cat <<'JSON'\n"
-        f'{{"uid":"{uid}","id":"ERI-908","display_ref":"{display_ref}",'
+        f'{{"uid":"{uid}","id":"TASK-908","display_ref":"{display_ref}",'
+        f'"tier":"{tier}",'
         '"status":"In Progress","state_type":"started"}\n'
         "JSON\n",
         encoding="utf-8",

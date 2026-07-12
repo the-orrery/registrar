@@ -586,16 +586,13 @@ def _slugify(value: str) -> str:
     return re.sub(r"-+", "-", raw).strip("-")
 
 
-def _infer_world(
+def _collect_world_signals(
     owner: NormalizedOwner,
     source_path: Path | None,
     records: list[RegistryAsset],
     workspace_root: Path,
     explicit: str,
-) -> str:
-    if explicit and explicit not in {"personal", "work"}:
-        raise RegistrarError("--world must be personal or work")
-
+) -> dict[str, str]:
     signals: dict[str, str] = {}
     if explicit:
         signals["--world"] = explicit
@@ -612,7 +609,22 @@ def _infer_world(
         signals["owner prefix"] = "work"
     elif prefix in PERSONAL_PREFIXES:
         signals["owner prefix"] = "personal"
+    return signals
 
+
+def _infer_world(
+    owner: NormalizedOwner,
+    source_path: Path | None,
+    records: list[RegistryAsset],
+    workspace_root: Path,
+    explicit: str,
+) -> str:
+    if explicit and explicit not in {"personal", "work"}:
+        raise RegistrarError("--world must be personal or work")
+
+    signals = _collect_world_signals(
+        owner, source_path, records, workspace_root, explicit
+    )
     worlds = set(signals.values())
     if len(worlds) > 1:
         detail = ", ".join(f"{key}={value}" for key, value in signals.items())
@@ -636,9 +648,10 @@ def _validate_registry_world(
         for record in records
         if (value := record.labels.get("world")) in {"personal", "work"}
     }
-    if active_tier := os.environ.get("REGISTRAR_ACTIVE_TIER", "").strip():
-        if active_tier in {"personal", "work"}:
-            declared_worlds.add(active_tier)
+    if (
+        active_tier := os.environ.get("REGISTRAR_ACTIVE_TIER", "").strip()
+    ) and active_tier in {"personal", "work"}:
+        declared_worlds.add(active_tier)
     if path_world := _world_from_path(registry_root, workspace_root):
         declared_worlds.add(path_world)
     if len(declared_worlds) > 1:

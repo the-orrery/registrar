@@ -11,7 +11,26 @@ uv run --group freeze pyinstaller --noconfirm --onedir --clean \
   --paths "${ROOT}/src" --collect-submodules registrar --name registrar \
   --distpath "${BUILD_DIR}/dist" --workpath "${BUILD_DIR}/work/registrar" \
   --specpath "${BUILD_DIR}/spec" "${ROOT}/scripts/registrar_entry.py"
-tar -C "${BUILD_DIR}/dist" -czf "${OUTPUT_DIR}/registrar-${platform}-${arch}.tar.gz" registrar
+archive="${OUTPUT_DIR}/registrar-${platform}-${arch}.tar.gz"
+COPYFILE_DISABLE=1 tar -C "${BUILD_DIR}/dist" -czf "${archive}" registrar
+python3 - "${archive}" <<'PY'
+import sys
+import tarfile
+from pathlib import PurePosixPath
+
+archive = sys.argv[1]
+with tarfile.open(archive, "r:gz") as bundle:
+    for member in bundle.getmembers():
+        path = PurePosixPath(member.name)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or not path.parts
+            or path.parts[0] != "registrar"
+            or any(part.startswith("._") for part in path.parts)
+        ):
+            raise SystemExit(f"unsafe release bundle member: {member.name}")
+PY
 if [[ "${SKIP_SMOKE:-0}" != "1" ]]; then
   smoke_root="$(mktemp -d)"
   CI=1 XDG_DATA_HOME="${smoke_root}/data" XDG_CACHE_HOME="${smoke_root}/cache" \

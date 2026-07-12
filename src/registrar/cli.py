@@ -952,6 +952,7 @@ def _consume_tier(argv: list[str]) -> list[str]:
         print(f"error: unknown tier '{tier_name}'. Available: {avail}", file=sys.stderr)
         sys.exit(2)
     cfg = tiers[tier_name]
+    os.environ["REGISTRAR_ACTIVE_TIER"] = tier_name
     os.environ["REGISTRAR_WORKSPACE_ROOT"] = cfg["workspace_root"]
     os.environ["REGISTRAR_REGISTRY_ROOT"] = cfg["registry_root"]
     return argv[:idx] + argv[idx + 2 :]
